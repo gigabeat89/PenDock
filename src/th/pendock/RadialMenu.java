@@ -116,7 +116,7 @@ final class RadialMenu extends FrameLayout {
             directionX[index] = (float) Math.cos(angle);
             directionY[index] = (float) Math.sin(angle);
         }
-        ringSize = dp(285 * maxScale);
+        ringSize = dp(304 * maxScale);
         iconHalf = dp(27);
         hubHalfWidth = dp(56);
         highlightOffset = dp(3);
@@ -209,7 +209,7 @@ final class RadialMenu extends FrameLayout {
     @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         if (width <= 0 || height <= 0) return;
-        scale = Math.min(maxScale, Math.min(width, height) / (float) dp(285));
+        scale = Math.min(maxScale, Math.min(width, height) / (float) dp(304));
         outerRadius = dp(buttons.length == 0 ? HUB_RADIUS_DP : buttons.length > 5 ? 130 : 119) * scale;
         float innerRadius = dp(61) * scale;
         iconOrbit = lerp(innerRadius, outerRadius, .54f);
@@ -502,7 +502,7 @@ final class RadialMenu extends FrameLayout {
     private void place(float x, float y) {
         anchorX = x;
         anchorY = y;
-        float extent = outerRadius + highlightOffset + dp(5) * scale;
+        float extent = outerRadius + highlightOffset + dp(14) * scale;
         centerX = Math.max(extent, Math.min(getWidth() - extent, x));
         centerY = Math.max(extent, Math.min(getHeight() - extent, y));
         ring.setTranslationX(centerX - ringSize / 2f);
@@ -577,10 +577,12 @@ final class RadialMenu extends FrameLayout {
     // Only the small artwork pane is transformed during open and close.
     private final class Ring extends FrameLayout {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         Ring(Context context) {
             super(context);
             setWillNotDraw(false);
+            shadowPaint.setStyle(Paint.Style.FILL);
         }
 
         // Fade the small ring directly without allocating an intermediate alpha layer.
@@ -588,13 +590,32 @@ final class RadialMenu extends FrameLayout {
 
         @Override protected void onDraw(Canvas canvas) {
             float middle = ringSize / 2f;
+            float hubRadius = dp(HUB_RADIUS_DP) * scale;
+            float shadowRadius = Math.max(1f, dp(9.5f) * scale);
+
+            // Pass 1: cast soft shadows behind both hub and petals so shadows never muddy adjacent petals.
+            shadowPaint.setColor(colors.core);
+            shadowPaint.setShadowLayer(shadowRadius, 0f, 0f, colors.ringShadow);
+            canvas.drawCircle(middle, middle, hubRadius, shadowPaint);
+            int shadowSave = canvas.save();
+            canvas.translate(middle, middle);
+            for (int index = 0; index < buttons.length; index++) {
+                int segmentSave = canvas.save();
+                canvas.rotate(angles[index] + 90);
+                canvas.translate(0, -segmentOffset(index));
+                canvas.drawPath(segment, shadowPaint);
+                canvas.restoreToCount(segmentSave);
+            }
+            canvas.restoreToCount(shadowSave);
+
+            // Pass 2: crisp fills and subtle contrast borders on top.
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(colors.core);
-            canvas.drawCircle(middle, middle, dp(HUB_RADIUS_DP) * scale, paint);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(Math.max(1, dp(1) * .65f * scale));
+            paint.setStrokeWidth(Math.max(1, dp(1) * .85f * scale));
             paint.setColor(colors.ringBorder);
-            canvas.drawCircle(middle, middle, dp(HUB_RADIUS_DP) * scale, paint);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
             int ringSave = canvas.save();
             canvas.translate(middle, middle);
             for (int index = 0; index < buttons.length; index++) {

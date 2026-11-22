@@ -53,7 +53,7 @@ final class Appearance {
     static final class Palette {
         final boolean dark;
         final int background, rail, surface, text, muted, border, accent, accentWash;
-        final int petal, petalSelected, petalDisabled, core, ringBorder, disabledInk;
+        final int petal, petalSelected, petalDisabled, core, ringBorder, ringShadow, disabledInk;
 
         Palette(boolean dark) {
             this.dark = dark;
@@ -69,7 +69,8 @@ final class Appearance {
             petalSelected = pick(0xffdce6ff, 0xff455f9d);
             petalDisabled = pick(0xffe5e9f3, 0xff202739);
             core = pick(0xfffdfdff, 0xff171f34);
-            ringBorder = pick(0xefffffff, 0xff4a5878);
+            ringBorder = pick(0x281b2440, 0x668ba2cc);
+            ringShadow = pick(0x42101a33, 0x99000000);
             disabledInk = pick(0xff687588, 0xff9ba7bc);
         }
 
