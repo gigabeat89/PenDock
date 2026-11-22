@@ -86,6 +86,7 @@ public class DockService extends Service {
     private Bitmap circleFrame;
     private int circleRequest;
     private int splitRequest;
+    private int menuRequest;
     private final ExecutorService background = Executors.newSingleThreadExecutor();
     private Shortcuts shortcuts;
     private ExcludedApps exclusions;
@@ -213,6 +214,28 @@ public class DockService extends Service {
             android.util.Log.d("PenDock", "Skipped pen menu for an excluded app");
             return;
         }
+        int request = ++menuRequest;
+        int blurDp = RingConfig.ringBlurDp(this);
+        if (blurDp > 0 && Build.VERSION.SDK_INT >= 31
+                && !manager.isCrossWindowBlurEnabled() && CircleCaptureService.isReady()) {
+            CircleCaptureService.capture(frame -> attachMenu(request, useHover, focused, frame));
+            return;
+        }
+        attachMenu(request, useHover, focused, null);
+    }
+
+    private void attachMenu(int request, boolean useHover, WindowModeMonitor.FocusedApp focused, Bitmap blurFrame) {
+        if (request != menuRequest || !running || menu != null || circleSelection != null
+                || splitPicker != null || laserOverlay != null
+                || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+            if (blurFrame != null) blurFrame.recycle();
+            return;
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            if (blurFrame != null) blurFrame.recycle();
+            stopSelf();
+            return;
+        }
         Rect bounds = displayBounds();
         Intent activeTarget = SystemScreenshot.isReady() && SystemScreenshot.tracksActiveApp() && focused != null
                 ? focused.floatingIntent : null;
@@ -224,12 +247,16 @@ public class DockService extends Service {
                 activeTarget == null || alreadyWindowed ? null : () -> floatActive(activeTarget, focused),
                 alreadyWindowed,
                 activeTarget == null || alreadySplit ? null : () -> splitActive(activeTarget, focused),
-                alreadySplit);
+                alreadySplit, blurFrame);
+        int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+        int blurDp = RingConfig.ringBlurDp(this);
+        boolean nativeBlur = blurFrame == null && blurDp > 0 && Build.VERSION.SDK_INT >= 31
+                && manager.isCrossWindowBlurEnabled();
+        if (nativeBlur) flags |= WindowManager.LayoutParams.FLAG_BLUR_BEHIND;
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
-                PixelFormat.TRANSLUCENT);
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT);
+        if (nativeBlur) params.setBlurBehindRadius(Ui.dp(this, blurDp));
         params.setTitle("PenDock menu");
         params.gravity = Gravity.TOP | Gravity.LEFT;
         if (Build.VERSION.SDK_INT >= 30) {
@@ -253,6 +280,7 @@ public class DockService extends Service {
                 }
             }, 350);
         } catch (WindowManager.BadTokenException | SecurityException unavailable) {
+            if (blurFrame != null && !blurFrame.isRecycled()) blurFrame.recycle();
             stopSelf();
         }
     }
@@ -691,6 +719,7 @@ public class DockService extends Service {
     }
 
     private void detach() {
+        menuRequest++;
         if (menu == null) return;
         RadialMenu removed = menu;
         menu = null;

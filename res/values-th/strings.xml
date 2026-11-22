@@ -145,6 +145,10 @@
     <string name="size_small">เล็ก</string>
     <string name="size_normal">ปกติ</string>
     <string name="size_large">ใหญ่</string>
+    <string name="ring_dim">หรี่แสงหน้าจอเมื่อเปิดวงเมนู</string>
+    <string name="ring_dim_off">ปิด</string>
+    <string name="ring_blur">เบลอหน้าจอเมื่อเปิดวงเมนู</string>
+    <string name="ring_blur_permission_hint">เปิดสิทธิ์ วงเพื่อค้นหา เพื่อให้เบลอพื้นหลังบนอุปกรณ์นี้ได้</string>
     <string name="launch_mode">รูปแบบเปิดแอพทางลัด</string>
     <string name="launch_floating">หน้าต่างลอย</string>
     <string name="launch_split">แบ่งหน้าจอ</string>

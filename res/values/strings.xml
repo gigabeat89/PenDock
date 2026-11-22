@@ -146,6 +146,10 @@
     <string name="size_small">Small</string>
     <string name="size_normal">Normal</string>
     <string name="size_large">Large</string>
+    <string name="ring_dim">Dim screen when ring is open</string>
+    <string name="ring_dim_off">Off</string>
+    <string name="ring_blur">Blur screen when ring is open</string>
+    <string name="ring_blur_permission_hint">Enable Circle to Search permission to blur the background on this device</string>
     <string name="launch_mode">Open shortcuts as</string>
     <string name="launch_floating">Floating</string>
     <string name="launch_split">Split screen</string>

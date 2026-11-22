@@ -17,9 +17,13 @@ final class RingConfig {
     static final String WINDOW_LARGE = "large";
 
     private static final String RING_SIZE = "ring_size";
+    private static final String RING_DIM = "ring_dim_percent";
+    private static final String RING_BLUR = "ring_blur_dp";
     private static final String LAUNCH_MODE = "launch_mode";
     private static final String WINDOW_SIZE = "floating_window_size";
     private static final String AUTO_START = "auto_start_boot";
+    static final int MAX_DIM_PERCENT = 70;
+    static final int MAX_BLUR_DP = 24;
 
     private RingConfig() { }
 
@@ -42,6 +46,30 @@ final class RingConfig {
         if (SIZE_SMALL.equals(size)) return 0.84f;
         if (SIZE_LARGE.equals(size)) return 1.18f;
         return 1.0f;
+    }
+
+    static int ringDimPercent(Context context) {
+        int value = prefs(context).getInt(RING_DIM, 0);
+        return Math.max(0, Math.min(MAX_DIM_PERCENT, value));
+    }
+
+    static void setRingDimPercent(Context context, int percent) {
+        int clamped = Math.max(0, Math.min(MAX_DIM_PERCENT, percent));
+        prefs(context).edit().putInt(RING_DIM, clamped).apply();
+    }
+
+    static float ringDimAlpha(Context context) {
+        return ringDimPercent(context) / 100f;
+    }
+
+    static int ringBlurDp(Context context) {
+        int value = prefs(context).getInt(RING_BLUR, 0);
+        return Math.max(0, Math.min(MAX_BLUR_DP, value));
+    }
+
+    static void setRingBlurDp(Context context, int dp) {
+        int clamped = Math.max(0, Math.min(MAX_BLUR_DP, dp));
+        prefs(context).edit().putInt(RING_BLUR, clamped).apply();
     }
 
     static String launchMode(Context context) {

@@ -9,6 +9,8 @@ import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Point;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
@@ -35,6 +37,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -51,6 +54,8 @@ import java.util.function.Supplier;
 public class MainActivity extends Activity {
     private LinearLayout headerActions, content, previewPanel, exclusionsSection, permissionsSection;
     private FrameLayout previewScene;
+    private PreviewWallpaper previewWallpaper;
+    private RadialMenu previewMenu;
     private boolean dualPane;
     private String appliedTheme, appliedLanguage;
     private ScrollView scroll;
@@ -256,6 +261,8 @@ public class MainActivity extends Activity {
                     RingConfig.setRingSize(this, size);
                     refreshPreview(shortcuts.selected());
                 }));
+        addRow(pen, dimSliderRow());
+        if (Build.VERSION.SDK_INT >= 31) addRow(pen, blurSliderRow());
         LinearLayout windowSizeGroup = Ui.column(this);
         View windowDivider = new View(this);
         windowDivider.setBackgroundColor(colors.border);
@@ -275,6 +282,110 @@ public class MainActivity extends Activity {
                 }));
         pen.addView(windowSizeGroup, new LinearLayout.LayoutParams(-1, -2));
         add(pen, 8);
+    }
+
+    private LinearLayout dimSliderRow() {
+        LinearLayout row = Ui.column(this);
+        row.setPadding(0, dp(10), 0, dp(10));
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(Ui.text(this, getString(R.string.ring_dim), 14, colors.text, false),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        int initial = RingConfig.ringDimPercent(this);
+        TextView valueLabel = Ui.text(this, dimLabel(initial), 13,
+                initial > 0 ? colors.accent : colors.muted, true);
+        header.addView(valueLabel);
+        row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(RingConfig.MAX_DIM_PERCENT / 5);
+        slider.setProgress(Math.round(initial / 5f));
+        slider.setThumbTintList(ColorStateList.valueOf(colors.accent));
+        slider.setProgressTintList(ColorStateList.valueOf(colors.accent));
+        slider.setProgressBackgroundTintList(ColorStateList.valueOf(colors.border));
+        slider.setContentDescription(getString(R.string.ring_dim));
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int step, boolean fromUser) {
+                int percent = step * 5;
+                RingConfig.setRingDimPercent(MainActivity.this, percent);
+                valueLabel.setText(dimLabel(percent));
+                valueLabel.setTextColor(percent > 0 ? colors.accent : colors.muted);
+                if (previewMenu != null) previewMenu.setDimAlpha(percent / 100f);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        LinearLayout.LayoutParams sliderParams = new LinearLayout.LayoutParams(-1, -2);
+        sliderParams.topMargin = dp(6);
+        row.addView(slider, sliderParams);
+        return row;
+    }
+
+    private String dimLabel(int percent) {
+        return percent <= 0 ? getString(R.string.ring_dim_off) : percent + "%";
+    }
+
+    private LinearLayout blurSliderRow() {
+        LinearLayout row = Ui.column(this);
+        row.setPadding(0, dp(10), 0, dp(10));
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(Ui.text(this, getString(R.string.ring_blur), 14, colors.text, false),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        int initial = RingConfig.ringBlurDp(this);
+        TextView valueLabel = Ui.text(this, blurLabel(initial), 13,
+                initial > 0 ? colors.accent : colors.muted, true);
+        header.addView(valueLabel);
+        row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(RingConfig.MAX_BLUR_DP / 2);
+        slider.setProgress(Math.round(initial / 2f));
+        slider.setThumbTintList(ColorStateList.valueOf(colors.accent));
+        slider.setProgressTintList(ColorStateList.valueOf(colors.accent));
+        slider.setProgressBackgroundTintList(ColorStateList.valueOf(colors.border));
+        slider.setContentDescription(getString(R.string.ring_blur));
+
+        boolean needsCaptureHint = !getSystemService(android.view.WindowManager.class).isCrossWindowBlurEnabled()
+                && !CircleCaptureService.isReady();
+        TextView hint = Ui.text(this, getString(R.string.ring_blur_permission_hint), 12, colors.muted, false);
+        hint.setPadding(0, dp(4), 0, 0);
+        hint.setVisibility(needsCaptureHint && initial > 0 ? View.VISIBLE : View.GONE);
+
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int step, boolean fromUser) {
+                int blurDp = step * 2;
+                RingConfig.setRingBlurDp(MainActivity.this, blurDp);
+                valueLabel.setText(blurLabel(blurDp));
+                valueLabel.setTextColor(blurDp > 0 ? colors.accent : colors.muted);
+                hint.setVisibility(needsCaptureHint && blurDp > 0 ? View.VISIBLE : View.GONE);
+                applyPreviewBlur(blurDp);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        LinearLayout.LayoutParams sliderParams = new LinearLayout.LayoutParams(-1, -2);
+        sliderParams.topMargin = dp(6);
+        row.addView(slider, sliderParams);
+        row.addView(hint);
+        return row;
+    }
+
+    private String blurLabel(int blurDp) {
+        return blurDp <= 0 ? getString(R.string.ring_dim_off)
+                : Math.round(blurDp * 100f / RingConfig.MAX_BLUR_DP) + "%";
+    }
+
+    private void applyPreviewBlur(int blurDp) {
+        if (previewWallpaper == null || Build.VERSION.SDK_INT < 31) return;
+        if (blurDp <= 0) {
+            previewWallpaper.setRenderEffect(null);
+        } else {
+            float radius = dp(blurDp);
+            previewWallpaper.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
+        }
     }
 
     private LinearLayout choiceRow(int title, String current, int[] optionLabels, String[] optionValues,
@@ -693,7 +804,9 @@ public class MainActivity extends Activity {
         previewScene = new FrameLayout(this);
         previewScene.setBackground(Ui.shape(this, colors.rail, 16));
         previewScene.setClipToOutline(true);
-        previewScene.addView(new PreviewWallpaper(this, colors.dark), new FrameLayout.LayoutParams(-1, -1));
+        previewWallpaper = new PreviewWallpaper(this, colors.dark);
+        previewScene.addView(previewWallpaper, new FrameLayout.LayoutParams(-1, -1));
+        applyPreviewBlur(RingConfig.ringBlurDp(this));
         int height = getResources().getConfiguration().screenHeightDp;
         int sceneHeight = dualPane ? Math.max(345, Math.min(445, height * 44 / 100)) : 345;
         LinearLayout.LayoutParams stage = new LinearLayout.LayoutParams(-1, dp(sceneHeight));
@@ -705,7 +818,8 @@ public class MainActivity extends Activity {
     private void refreshPreview(List<Shortcuts.Entry> selected) {
         if (previewScene == null) return;
         if (previewScene.getChildCount() > 1) previewScene.removeViewAt(1);
-        previewScene.addView(RadialMenu.preview(this, selected), new FrameLayout.LayoutParams(-1, -1));
+        previewMenu = RadialMenu.preview(this, selected);
+        previewScene.addView(previewMenu, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private LinearLayout pane() {

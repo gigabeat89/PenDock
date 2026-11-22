@@ -5,10 +5,13 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Region;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.text.TextUtils;
@@ -37,6 +40,9 @@ final class RadialMenu extends FrameLayout {
     private final Runnable[] actions;
     private final Shortcuts.Tool[] tools;
     private final Ring ring;
+    private final View blurLayer;
+    private final View dimLayer;
+    private Bitmap blurFrame;
     private final float[] angles, directionX, directionY;
     private final int ringSize;
     private final int iconHalf, hubHalfWidth, highlightOffset;
@@ -66,34 +72,40 @@ final class RadialMenu extends FrameLayout {
     private float outerRadius, iconOrbit, scale;
     private ValueAnimator highlightAnimation;
     private ValueAnimator batteryAnimation;
+    private ValueAnimator dimAnimation;
+    private float dimAlpha;
+    private float dimProgress;
     private boolean batteryWanted;
     private float batteryExpansion;
 
     RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
             Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode, Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
-            Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit) {
+            Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
+            Bitmap blurFrame) {
         this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, laserMode, close,
-                entries, launch, battery, floatActive, alreadyWindowed, splitActive, alreadySplit, false);
+                entries, launch, battery, floatActive, alreadyWindowed, splitActive, alreadySplit,
+                blurFrame, false);
     }
 
     static RadialMenu preview(Context context, List<Shortcuts.Entry> entries) {
         Runnable sample = () -> { };
         return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample,
-                entries, app -> { }, "—", sample, false, sample, false, true);
+                entries, app -> { }, "—", sample, false, sample, false, null, true);
     }
 
     private RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
             Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode, Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
-            boolean preview) {
+            Bitmap blurFrame, boolean preview) {
         super(context);
         this.preview = preview;
         // Huawei can slow the overlay's UI frame cadence when no PenDock Accessibility service is bound.
         useSeparateSurface = !preview && "huawei".equalsIgnoreCase(Build.MANUFACTURER)
                 && !WindowModeMonitor.isReady() && !SystemScreenshot.isReady() && !CircleCaptureService.isReady();
         maxScale = RingConfig.ringScale(context);
+        dimAlpha = RingConfig.ringDimAlpha(context);
         colors = Ui.colors(context);
         this.fallbackX = fallbackX;
         this.fallbackY = fallbackY;
@@ -120,6 +132,35 @@ final class RadialMenu extends FrameLayout {
         iconHalf = dp(27);
         hubHalfWidth = dp(56);
         highlightOffset = dp(3);
+        this.blurFrame = blurFrame;
+        int blurDp = RingConfig.ringBlurDp(context);
+        if (!preview && blurFrame != null && blurDp > 0 && Build.VERSION.SDK_INT >= 31) {
+            Paint framePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+            blurLayer = new View(context) {
+                @Override protected void onDraw(Canvas canvas) {
+                    Bitmap frame = RadialMenu.this.blurFrame;
+                    if (frame == null || frame.isRecycled()) return;
+                    getLocationOnScreen(screenOrigin);
+                    canvas.drawBitmap(frame, -screenOrigin[0], -screenOrigin[1], framePaint);
+                }
+            };
+            float radius = dp(blurDp);
+            blurLayer.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
+            blurLayer.setAlpha(0f);
+            blurLayer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            addView(blurLayer, new LayoutParams(-1, -1));
+        } else {
+            if (this.blurFrame != null) {
+                this.blurFrame.recycle();
+                this.blurFrame = null;
+            }
+            blurLayer = null;
+        }
+        dimLayer = new View(context);
+        dimLayer.setBackgroundColor(Color.BLACK);
+        dimLayer.setAlpha(0f);
+        dimLayer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        addView(dimLayer, new LayoutParams(-1, -1));
         ring = new Ring(context);
         ring.setVisibility(INVISIBLE);
         addView(ring, new LayoutParams(ringSize, ringSize));
@@ -179,6 +220,45 @@ final class RadialMenu extends FrameLayout {
         batteryStatus.setVisibility(INVISIBLE);
         setBattery(battery);
         ring.addView(batteryStatus, new LayoutParams(hubHalfWidth * 2, dp(22)));
+        if (preview) {
+            dimProgress = 1f;
+            applyDim();
+        }
+    }
+
+    void setDimAlpha(float alpha) {
+        dimAlpha = Math.max(0f, Math.min(1f, alpha));
+        if (preview) {
+            dimProgress = 1f;
+            applyDim();
+        }
+    }
+
+    private void applyDim() {
+        dimLayer.setAlpha(dimAlpha * dimProgress);
+        if (blurLayer != null) blurLayer.setAlpha(dimProgress);
+    }
+
+    private void animateDim(float target, long duration, TimeInterpolator interpolator) {
+        if (dimAnimation != null) dimAnimation.cancel();
+        if (dimAlpha <= 0f && blurLayer == null) {
+            dimProgress = 0f;
+            applyDim();
+            return;
+        }
+        if (duration <= 0 || !ValueAnimator.areAnimatorsEnabled()) {
+            dimProgress = target;
+            applyDim();
+            return;
+        }
+        dimAnimation = ValueAnimator.ofFloat(dimProgress, target);
+        dimAnimation.setDuration(duration);
+        dimAnimation.setInterpolator(interpolator);
+        dimAnimation.addUpdateListener(animation -> {
+            dimProgress = (float) animation.getAnimatedValue();
+            applyDim();
+        });
+        dimAnimation.start();
     }
 
     void setBattery(String battery) {
@@ -425,6 +505,7 @@ final class RadialMenu extends FrameLayout {
         place(x, y);
         revealed = true;
         boolean animate = !preview && ValueAnimator.areAnimatorsEnabled();
+        if (!preview) animateDim(1f, animate ? OPEN_DURATION_MS : 0, OPEN);
         if (animate && startSurfaceAnimation(true, OPEN, OPEN_DURATION_MS, () -> {
             ring.setVisibility(VISIBLE);
             completeOpening();
@@ -682,9 +763,13 @@ final class RadialMenu extends FrameLayout {
         opening = false;
         hoverPending = false;
         if (!revealed || !ValueAnimator.areAnimatorsEnabled()) {
+            if (dimAnimation != null) dimAnimation.cancel();
+            dimProgress = 0f;
+            applyDim();
             next.run();
             return;
         }
+        animateDim(0f, duration, CLOSE);
         ring.animate().cancel();
         if (highlightAnimation != null) highlightAnimation.cancel();
         if (batteryAnimation != null) batteryAnimation.cancel();
@@ -705,6 +790,11 @@ final class RadialMenu extends FrameLayout {
         ring.animate().cancel();
         if (highlightAnimation != null) highlightAnimation.cancel();
         if (batteryAnimation != null) batteryAnimation.cancel();
+        if (dimAnimation != null) dimAnimation.cancel();
+        if (blurFrame != null) {
+            blurFrame.recycle();
+            blurFrame = null;
+        }
         super.onDetachedFromWindow();
     }
 
