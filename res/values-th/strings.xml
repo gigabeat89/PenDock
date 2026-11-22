@@ -85,7 +85,9 @@
     <string name="drag_hint">กดค้างที่แถวแอพ แล้วลากขึ้นหรือลงเพื่อจัดลำดับ</string>
     <string name="drag_named">ลากเพื่อจัดลำดับ %1$s</string>
     <string name="empty_ring">เพิ่มแอพและเครื่องมือรวมกันได้สูงสุด 10 รายการ</string>
-    <string name="dock_enabled">วงเมนูเปิดอยู่</string>
+    <string name="dock_running">ทำงานอยู่</string>
+    <string name="dock_stopped">หยุดทำงาน</string>
+    <string name="pen_near_only">เปิดวงเมนูเฉพาะเมื่อปากกาอยู่ใกล้จอ</string>
     <string name="theme">ธีม</string>
     <string name="pen_input_hint">ใช้นิ้ว / touchpad ได้</string>
     <string name="excluded_count">%1$d แอพ</string>

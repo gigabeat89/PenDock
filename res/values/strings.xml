@@ -86,7 +86,9 @@
     <string name="drag_hint">Press and hold an app row, then drag it up or down</string>
     <string name="drag_named">Drag to reorder %1$s</string>
     <string name="empty_ring">Add up to 10 apps and tools in total</string>
-    <string name="dock_enabled">Ring menu enabled</string>
+    <string name="dock_running">Running</string>
+    <string name="dock_stopped">Stopped</string>
+    <string name="pen_near_only">Open the ring only near the screen</string>
     <string name="theme">Theme</string>
     <string name="pen_input_hint">Touch and touchpad input supported</string>
     <string name="excluded_count">%1$d apps</string>

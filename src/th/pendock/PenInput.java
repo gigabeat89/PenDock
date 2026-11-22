@@ -7,6 +7,7 @@ import java.util.Locale;
 
 final class PenInput {
     private static final String PEN_ONLY_MENU = "pen_only_menu";
+    private static final String REQUIRE_NEAR_SCREEN = "require_near_screen";
 
     static boolean isPenOnlyMenu(Context context) {
         return context.getSharedPreferences("tools", Context.MODE_PRIVATE)
@@ -16,6 +17,16 @@ final class PenInput {
     static void setPenOnlyMenu(Context context, boolean enabled) {
         context.getSharedPreferences("tools", Context.MODE_PRIVATE).edit()
                 .putBoolean(PEN_ONLY_MENU, enabled).apply();
+    }
+
+    static boolean requiresNearScreen(Context context) {
+        return context.getSharedPreferences("tools", Context.MODE_PRIVATE)
+                .getBoolean(REQUIRE_NEAR_SCREEN, false);
+    }
+
+    static void setRequiresNearScreen(Context context, boolean enabled) {
+        context.getSharedPreferences("tools", Context.MODE_PRIVATE).edit()
+                .putBoolean(REQUIRE_NEAR_SCREEN, enabled).apply();
     }
 
     static boolean isButtonPress(MotionEvent event) {

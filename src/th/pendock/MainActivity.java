@@ -170,24 +170,24 @@ public class MainActivity extends Activity {
 
     private void renderHeader() {
         headerActions.removeAllViews();
-        TextView dock = Ui.action(this, getString(menuStatus ? R.string.dock_enabled : R.string.dock_on),
-                !menuStatus, this::toggleDock);
-        if (menuStatus) dock.setBackground(Ui.pressable(this, colors.accentWash, 12, colors.accent));
-        dock.setMaxWidth(dp(dualPane ? 300 : 152));
-        dock.setSelected(menuStatus);
-        dock.setStateDescription(getString(menuStatus ? R.string.dock_off : R.string.dock_on));
-        android.graphics.drawable.Drawable power = getDrawable(R.drawable.ic_power).mutate();
-        power.setTint(dock.getCurrentTextColor());
-        power.setBounds(0, 0, dp(17), dp(17));
-        if (dualPane) {
-            dock.setCompoundDrawablesRelative(power, null, null, null);
-            dock.setCompoundDrawablePadding(dp(8));
-        }
-        headerActions.addView(dock, new LinearLayout.LayoutParams(-2, -2));
+        int dockAction = menuStatus ? R.string.dock_off : R.string.dock_on;
+        ImageButton dock = Ui.iconAction(this, R.drawable.ic_power, dockAction, this::toggleDock);
+        dock.setTooltipText(getString(dockAction));
+        dock.setImageTintList(ColorStateList.valueOf(dockStatusStroke()));
+        dock.setBackground(Ui.pressable(this, dockStatusFill(), 12, dockStatusStroke()));
+        headerActions.addView(dock, new LinearLayout.LayoutParams(dp(60), dp(48)));
         LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         settingsParams.setMarginStart(dp(8));
         headerActions.addView(Ui.iconAction(this, R.drawable.ic_settings, R.string.settings,
                 () -> startActivity(new Intent(this, SettingsActivity.class))), settingsParams);
+    }
+
+    private int dockStatusStroke() {
+        return menuStatus ? colors.pick(0xff167245, 0xff8ce4ab) : colors.pick(0xffad293c, 0xffff9eaa);
+    }
+
+    private int dockStatusFill() {
+        return menuStatus ? colors.pick(0xffeaf6ee, 0xff20392a) : colors.pick(0xfffff0f1, 0xff40272e);
     }
 
     private void renderMenuSettings() {
@@ -233,6 +233,9 @@ public class MainActivity extends Activity {
             inputHint.setVisibility(enabled ? View.GONE : View.VISIBLE);
         });
         addRow(pen, penChoice);
+        Switch proximity = featureSwitch(R.string.pen_near_only, PenInput.requiresNearScreen(this));
+        proximity.setOnCheckedChangeListener((button, enabled) -> PenInput.setRequiresNearScreen(this, enabled));
+        addRow(pen, proximity);
         Switch laserToggle = featureSwitch(R.string.laser, LaserPointer.isEnabled(this));
         laserToggle.setOnCheckedChangeListener((button, enabled) -> {
             LaserPointer.setEnabled(this, enabled);
@@ -598,7 +601,17 @@ public class MainActivity extends Activity {
 
     private void renderPreview() {
         previewPanel.removeAllViews();
-        addSection(previewPanel, paneTitle(R.string.preview_ring), 0);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(paneTitle(R.string.preview_ring), new LinearLayout.LayoutParams(-2, -2));
+        TextView status = Ui.text(this, getString(menuStatus ? R.string.dock_running : R.string.dock_stopped),
+                12, dockStatusStroke(), true);
+        status.setPadding(dp(9), dp(4), dp(9), dp(4));
+        status.setBackground(Ui.border(this, dockStatusFill(), 12, dockStatusStroke()));
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-2, -2);
+        statusParams.setMarginStart(dp(9));
+        heading.addView(status, statusParams);
+        addSection(previewPanel, heading, 0);
         previewScene = new FrameLayout(this);
         previewScene.setBackground(Ui.shape(this, colors.rail, 16));
         previewScene.setClipToOutline(true);

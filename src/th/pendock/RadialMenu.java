@@ -43,7 +43,7 @@ final class RadialMenu extends FrameLayout {
     private final TextView hub, batteryStatus;
     private final LaserPointer laser;
     private final Runnable close;
-    private final boolean penOnly, preview;
+    private final boolean penOnly, preview, requireHover;
     private final float maxScale;
     private final Appearance.Palette colors;
     private final Runnable fallback = this::revealAtCenter;
@@ -89,6 +89,7 @@ final class RadialMenu extends FrameLayout {
         this.fallbackY = fallbackY;
         this.close = close;
         penOnly = !preview && PenInput.isPenOnlyMenu(context);
+        requireHover = !preview && useHover && PenInput.requiresNearScreen(context);
         int count = entries.size();
         actions = new Runnable[count];
         tools = new Shortcuts.Tool[count];
@@ -390,6 +391,11 @@ final class RadialMenu extends FrameLayout {
     }
 
     private void revealAtCenter() {
+        if (requireHover) {
+            android.util.Log.d("PenDock", "Skipped pen menu without stylus hover");
+            dismiss();
+            return;
+        }
         waitingForHover = false;
         if (preview) {
             reveal(getWidth() / 2f, getHeight() / 2f);

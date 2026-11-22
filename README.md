@@ -6,11 +6,11 @@ PenDock brings a customizable M-Pencil shortcut ring and a resizable stylus batt
 
 Download the APK from [GitHub Releases](https://github.com/gigabeat89/PenDock/releases) and open it on your MatePad.
 
-1. Open PenDock and tap **Enable ring menu**. Grant **Display over other apps** if prompted, then return to PenDock and enable the ring.
+1. Open PenDock and tap the power icon to enable the ring. Grant **Display over other apps** if prompted, then return to PenDock and enable the ring.
 2. Tap **Add app** to customize the ring. Select up to 10 items in total, including apps and built-in tools. Press and hold a row, then drag it to reorder the items. The preview updates while you drag.
 3. Hold M-Pencil near the screen and double-tap its side. Hover over an icon to see its label, then tap to select it. Hover over the center to see the battery level when the tablet reports it.
 
-Tap outside the ring or double-tap the stylus again to dismiss it. With **Use only the pen in the ring** enabled, touching the screen or clicking the touchpad dismisses the ring. Turn that setting off to select actions with touch or a touchpad.
+Tap outside the ring or double-tap the stylus again to dismiss it. With **Use only the pen in the ring** enabled, touching the screen or clicking the touchpad dismisses the ring. Turn that setting off to select actions with touch or a touchpad. Enable **Open the ring only near the screen** to require the tablet to detect the pen tip near the display. With this option off, a double-tap opens the ring at the center of the screen when the tablet cannot locate the pen tip.
 
 The gear icon opens **Settings**, where you can choose English or Thai and set the theme to Light, Dark, or System. New installations default to English and Light. Enable **Laser pointer** to mark the stylus position while hovering over PenDock or its ring.
 
