@@ -319,17 +319,10 @@ public class DockService extends Service {
     }
 
     private String penBattery() {
-        try {
-            android.content.ContentResolver settings = getContentResolver();
-            int connection = Settings.Global.getInt(settings, "huawei_bt_pencil_connection_state", -1);
-            int level = Settings.Global.getInt(settings, "huawei_bt_pencil_battery_level", -1);
-            if ((connection == -1 || connection == 2) && level >= 0 && level <= 100) {
-                return java.text.NumberFormat.getPercentInstance(java.util.Locale.forLanguageTag(Appearance.language(this))).format(level / 100.0);
-            }
-        } catch (SecurityException ignored) {
-            // Some firmware versions restrict these settings to Huawei components.
-        }
-        return "—";
+        int level = PenBattery.level(getContentResolver());
+        if (level < 0) return "—";
+        return java.text.NumberFormat.getPercentInstance(
+                java.util.Locale.forLanguageTag(Appearance.language(this))).format(level / 100.0);
     }
 
     private void lockScreen() {

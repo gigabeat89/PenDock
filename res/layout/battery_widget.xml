@@ -1,0 +1,28 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/battery_widget_card"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@drawable/widget_card_light"
+    android:paddingHorizontal="5dp"
+    android:paddingVertical="6dp">
+    <ImageView
+        android:id="@+id/battery_ring"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scaleType="fitCenter"
+        android:importantForAccessibility="no" />
+    <TextView
+        android:id="@+id/battery_caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:textSize="11sp"
+        android:importantForAccessibility="no" />
+</LinearLayout>

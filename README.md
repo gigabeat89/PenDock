@@ -14,6 +14,10 @@ Tap outside the ring or double-tap the stylus again to dismiss it. With **Use on
 
 The gear icon opens **Settings**, where you can choose English or Thai and set the theme to Light, Dark, or System. New installations default to English and Light. Enable **Laser pointer** to mark the stylus position while hovering over PenDock or its ring.
 
+## Pen battery widgets
+
+From the Home screen widget picker, add **Pen Battery** in 1×1, 1×2, 1×3, 2×1, or 3×1 (rows × columns). Widgets use PenDock's appearance setting and show their labels in English. The model, percentage, and charging indicator use the information reported by the tablet. A red meter indicates less than 20%, and **Unavailable** appears when the tablet does not report a battery level.
+
 ## Tools and permissions
 
 Use the **Permissions** panel to enable the services for the features you use.

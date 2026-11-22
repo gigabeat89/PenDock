@@ -15,7 +15,7 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
-    <application android:label="PenDock" android:theme="@style/AppTheme"
+    <application android:name=".PenDockApplication" android:label="PenDock" android:theme="@style/AppTheme"
         android:icon="@drawable/ic_launcher_ring" android:roundIcon="@drawable/ic_launcher_ring" android:allowBackup="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -34,6 +34,41 @@
                 <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
             </intent-filter>
         </provider>
+        <receiver android:name=".BatteryWidget$Compact" android:exported="false"
+            android:label="@string/widget_battery_1x1">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_battery_1x1" />
+        </receiver>
+        <receiver android:name=".BatteryWidget$Wide" android:exported="false"
+            android:label="@string/widget_battery_1x2">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_battery_1x2" />
+        </receiver>
+        <receiver android:name=".BatteryWidget$ExtraWide" android:exported="false"
+            android:label="@string/widget_battery_1x3">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_battery_1x3" />
+        </receiver>
+        <receiver android:name=".BatteryWidget$Tall" android:exported="false"
+            android:label="@string/widget_battery_2x1">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_battery_2x1" />
+        </receiver>
+        <receiver android:name=".BatteryWidget$ExtraTall" android:exported="false"
+            android:label="@string/widget_battery_3x1">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_battery_3x1" />
+        </receiver>
         <service android:name=".DockService" android:exported="false"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
