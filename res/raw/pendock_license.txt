@@ -1,0 +1,13 @@
+PenDock Free Use License
+
+1. Free use
+You may download, install, and use PenDock free of charge. You may share the official download links.
+
+2. Free redistribution of the original APK
+You may share the original, unmodified APK released by the PenDock developer, provided recipients receive it free of charge and any accompanying license and notices are kept intact.
+
+3. No sale or paid distribution
+You may not sell PenDock, charge for access to its APK, or include it in a software package offered for sale unless you have prior written permission from the copyright owner.
+
+4. Reserved rights
+All rights not expressly granted by this license are reserved, subject to applicable law.
