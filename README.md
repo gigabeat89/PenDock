@@ -29,7 +29,7 @@ Use the **Permissions** panel to enable the services for the features you use.
 | Screenshot and screen lock | Enable **PenDock · Screenshot and screen lock** in Accessibility. The ring calls the system screenshot and lock actions. |
 | Floating window | Enable **PenDock · Window status** and **PenDock · Screenshot and screen lock**. The floating-window tool is disabled on Home, when the current app is already floating, or when the app does not support floating windows. Opening a shortcut as a floating window can fall back to full screen if the system or app restricts floating windows. |
 | Circle to Search | Enable **PenDock · Circle to Search**. This requires Android 11 or later and a compatible version of the Google app. Circle an area with the pen to send only the circled image to Google Lens. The cropped image stays in the app cache for up to one day. |
-| Excluded apps | Enable **PenDock · Window status**, then add apps in **Excluded apps** to keep PenDock from opening over them. Huawei Notes and Notepad are included by default when available. |
+| Excluded apps | Enable **PenDock · Window status**, then add apps in **Excluded apps** to keep PenDock from opening over them. GoPaint, Notepad, and Notes are excluded by default when installed. Your saved exclusions are preserved when you update PenDock. |
 
 If Huawei stops PenDock in the background, use **Battery → Launch manager** to turn off **Manage automatically** for PenDock and enable **Run in background**. To keep PenDock open when you tap **Close all**, swipe down on its card in Recent tasks to lock it. The info buttons in PenDock show both steps.
 
