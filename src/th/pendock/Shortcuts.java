@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
+import android.util.LruCache;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -19,12 +20,15 @@ final class Shortcuts {
     private static final String LEGACY_KEY = "apps";
     private final Context context;
     private final PackageManager packages;
+    private final LruCache<String, Drawable> iconCache = new LruCache<>(128);
 
     enum Tool {
         LOCK("tool:lock", R.string.lock_screen, R.drawable.ic_lock),
         SCREENSHOT("tool:screenshot", R.string.capture_short, R.drawable.ic_capture),
         CIRCLE_SEARCH("tool:circle_search", R.string.circle_search, R.drawable.ic_circle_search),
-        FLOAT_WINDOW("tool:float_window", R.string.float_window, R.drawable.ic_float);
+        FLOAT_WINDOW("tool:float_window", R.string.float_window, R.drawable.ic_float),
+        SPLIT_SCREEN("tool:split_screen", R.string.split_screen, R.drawable.ic_split),
+        LASER_POINTER("tool:laser_pointer", R.string.laser_tool, R.drawable.ic_laser);
 
         final String id;
         final int label;
@@ -94,11 +98,28 @@ final class Shortcuts {
         for (ResolveInfo entry : packages.queryIntentActivities(launcher, 0)) {
             ApplicationInfo info = entry.activityInfo.applicationInfo;
             if (!seen.add(info.packageName)) continue;
-            result.add(new Entry(info.packageName, info.loadLabel(packages).toString(), info.loadIcon(packages), null));
+            result.add(new Entry(info.packageName, info.loadLabel(packages).toString(),
+                    iconCache.get(info.packageName), null));
         }
         Collator order = Collator.getInstance(context.getResources().getConfiguration().getLocales().get(0));
         result.sort((first, second) -> order.compare(first.label, second.label));
         return result;
+    }
+
+    Drawable cachedIcon(String packageName) {
+        return iconCache.get(packageName);
+    }
+
+    Drawable loadIcon(String packageName) {
+        Drawable cached = iconCache.get(packageName);
+        if (cached != null) return cached;
+        try {
+            Drawable icon = packages.getApplicationInfo(packageName, 0).loadIcon(packages);
+            if (icon != null) iconCache.put(packageName, icon);
+            return icon;
+        } catch (PackageManager.NameNotFoundException unavailable) {
+            return packages.getDefaultActivityIcon();
+        }
     }
 
     Entry describe(String packageName) {
@@ -110,7 +131,12 @@ final class Shortcuts {
         try {
             ApplicationInfo info = packages.getApplicationInfo(packageName, 0);
             if (requireLauncher && packages.getLaunchIntentForPackage(packageName) == null) return null;
-            return new Entry(packageName, info.loadLabel(packages).toString(), info.loadIcon(packages), null);
+            Drawable icon = iconCache.get(packageName);
+            if (icon == null) {
+                icon = info.loadIcon(packages);
+                if (icon != null) iconCache.put(packageName, icon);
+            }
+            return new Entry(packageName, info.loadLabel(packages).toString(), icon, null);
         } catch (PackageManager.NameNotFoundException unavailable) {
             return null;
         }

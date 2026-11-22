@@ -9,6 +9,7 @@ import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Point;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -41,7 +42,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 public class MainActivity extends Activity {
     private LinearLayout headerActions, content, previewPanel, exclusionsSection, permissionsSection;
@@ -53,7 +58,10 @@ public class MainActivity extends Activity {
     private ExcludedApps exclusions;
     private Appearance.Palette colors;
     private boolean menuStatus;
-    private LaserPointer laser;
+    private final ExecutorService background = Executors.newSingleThreadExecutor();
+    private final Runnable dockStateChanged = () -> {
+        if (!isFinishing() && !isDestroyed() && content != null && menuStatus != DockService.running) render();
+    };
 
     @Override protected void attachBaseContext(Context base) {
         super.attachBaseContext(Appearance.localize(base));
@@ -122,23 +130,16 @@ public class MainActivity extends Activity {
         addSection(rightColumn, previewPanel, dualPane ? 0 : 16);
 
         exclusionsSection = Ui.column(this);
-        addSection(leftColumn, exclusionsSection, 18);
+        addSection(rightColumn, exclusionsSection, 18);
         permissionsSection = Ui.column(this);
         addSection(rightColumn, permissionsSection, 18);
 
-        FrameLayout root = new FrameLayout(this) {
-            @Override public boolean dispatchHoverEvent(android.view.MotionEvent event) {
-                laser.update(event);
-                return super.dispatchHoverEvent(event);
-            }
-            @Override public boolean dispatchTouchEvent(android.view.MotionEvent event) {
-                laser.hide();
-                return super.dispatchTouchEvent(event);
-            }
-        };
-        root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
-        laser = new LaserPointer(root);
-        setContentView(root);
+        setContentView(scroll);
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        DockService.addStateListener(dockStateChanged);
     }
 
     @Override public void onResume() {
@@ -150,9 +151,18 @@ public class MainActivity extends Activity {
         render();
     }
 
+    @Override protected void onStop() {
+        DockService.removeStateListener(dockStateChanged);
+        super.onStop();
+    }
+
+    @Override protected void onDestroy() {
+        background.shutdownNow();
+        super.onDestroy();
+    }
+
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
-        if (!focused && laser != null) laser.hide();
         if (focused && content != null && menuStatus != DockService.running) render();
     }
 
@@ -236,21 +246,88 @@ public class MainActivity extends Activity {
         Switch proximity = featureSwitch(R.string.pen_near_only, PenInput.requiresNearScreen(this));
         proximity.setOnCheckedChangeListener((button, enabled) -> PenInput.setRequiresNearScreen(this, enabled));
         addRow(pen, proximity);
-        Switch laserToggle = featureSwitch(R.string.laser, LaserPointer.isEnabled(this));
-        laserToggle.setOnCheckedChangeListener((button, enabled) -> {
-            LaserPointer.setEnabled(this, enabled);
-            laser.setEnabled(enabled);
-            refreshPreview(shortcuts.selected());
-        });
-        addRow(pen, laserToggle);
+        Switch autoStart = featureSwitch(R.string.auto_start_boot, RingConfig.isAutoStart(this));
+        autoStart.setOnCheckedChangeListener((button, enabled) -> RingConfig.setAutoStart(this, enabled));
+        addRow(pen, autoStart);
+        addRow(pen, choiceRow(R.string.ring_size, RingConfig.ringSize(this),
+                new int[] {R.string.size_small, R.string.size_normal, R.string.size_large},
+                new String[] {RingConfig.SIZE_SMALL, RingConfig.SIZE_NORMAL, RingConfig.SIZE_LARGE},
+                size -> {
+                    RingConfig.setRingSize(this, size);
+                    refreshPreview(shortcuts.selected());
+                }));
+        LinearLayout windowSizeGroup = Ui.column(this);
+        View windowDivider = new View(this);
+        windowDivider.setBackgroundColor(colors.border);
+        windowSizeGroup.addView(windowDivider, new LinearLayout.LayoutParams(-1, dp(1)));
+        windowSizeGroup.addView(choiceRow(R.string.window_size, RingConfig.windowSize(this),
+                new int[] {R.string.window_compact, R.string.window_standard, R.string.window_large},
+                new String[] {RingConfig.WINDOW_COMPACT, RingConfig.WINDOW_NORMAL, RingConfig.WINDOW_LARGE},
+                size -> RingConfig.setWindowSize(this, size)), new LinearLayout.LayoutParams(-1, -2));
+        windowSizeGroup.setVisibility(RingConfig.isFloatingLaunch(this) ? View.VISIBLE : View.GONE);
+
+        addRow(pen, choiceRow(R.string.launch_mode, RingConfig.launchMode(this),
+                new int[] {R.string.launch_floating, R.string.launch_split, R.string.launch_fullscreen},
+                new String[] {RingConfig.LAUNCH_FLOATING, RingConfig.LAUNCH_SPLIT, RingConfig.LAUNCH_FULLSCREEN},
+                mode -> {
+                    RingConfig.setLaunchMode(this, mode);
+                    windowSizeGroup.setVisibility(RingConfig.LAUNCH_FLOATING.equals(mode) ? View.VISIBLE : View.GONE);
+                }));
+        pen.addView(windowSizeGroup, new LinearLayout.LayoutParams(-1, -2));
         add(pen, 8);
+    }
+
+    private LinearLayout choiceRow(int title, String current, int[] optionLabels, String[] optionValues,
+            Consumer<String> onSelected) {
+        LinearLayout row = Ui.column(this);
+        row.setPadding(0, dp(10), 0, dp(12));
+        row.addView(Ui.text(this, getString(title), 14, colors.text, false));
+        LinearLayout group = new LinearLayout(this);
+        group.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams groupParams = new LinearLayout.LayoutParams(-1, -2);
+        groupParams.topMargin = dp(8);
+        TextView[] buttons = new TextView[optionValues.length];
+        Runnable[] update = new Runnable[1];
+        String[] active = {current};
+        update[0] = () -> {
+            for (int i = 0; i < buttons.length; i++) {
+                boolean selected = optionValues[i].equals(active[0]);
+                buttons[i].setBackground(Ui.pressable(this,
+                        selected ? colors.accentWash : colors.rail, 10,
+                        selected ? colors.accent : colors.border));
+                buttons[i].setTextColor(selected ? colors.accent : colors.text);
+                buttons[i].setSelected(selected);
+            }
+        };
+        for (int i = 0; i < optionValues.length; i++) {
+            String value = optionValues[i];
+            TextView button = Ui.text(this, getString(optionLabels[i]), 13, colors.text, true);
+            button.setGravity(Gravity.CENTER);
+            button.setMinHeight(dp(42));
+            button.setPadding(dp(8), dp(6), dp(8), dp(6));
+            button.setSingleLine(true);
+            button.setFocusable(true);
+            button.setOnClickListener(view -> {
+                if (value.equals(active[0])) return;
+                active[0] = value;
+                update[0].run();
+                onSelected.accept(value);
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
+            if (i > 0) params.setMarginStart(dp(6));
+            group.addView(button, params);
+            buttons[i] = button;
+        }
+        update[0].run();
+        row.addView(group, groupParams);
+        return row;
     }
 
     private LinearLayout renderPermissions() {
         boolean overlay = Settings.canDrawOverlays(this);
         boolean screenshot = SystemScreenshot.isReady();
         boolean window = WindowModeMonitor.isReady();
-        boolean circle = Build.VERSION.SDK_INT >= 30 && LensShare.isAvailable(this);
+        boolean circle = Build.VERSION.SDK_INT >= 30;
         boolean circleReady = circle && CircleCaptureService.isReady();
         int granted = (overlay ? 1 : 0) + (screenshot ? 1 : 0) + (window ? 1 : 0) + (circleReady ? 1 : 0);
         LinearLayout system = pane();
@@ -594,7 +671,8 @@ public class MainActivity extends Activity {
         if (excluded.isEmpty()) addSection(panel, Ui.text(this, getString(R.string.empty_excluded), 14, colors.muted, false), 14);
         else addSection(panel, list, 12);
         addSection(panel, Ui.action(this, getString(R.string.add_excluded), false,
-                () -> pickApp(getString(R.string.add_excluded), shortcuts.availableExcept(exclusions.packages()),
+                () -> pickApp(getString(R.string.add_excluded),
+                        () -> shortcuts.availableExcept(exclusions.packages()),
                         app -> exclusions.add(app.id), false)), 10);
         return panel;
     }
@@ -617,7 +695,7 @@ public class MainActivity extends Activity {
         previewScene.setClipToOutline(true);
         previewScene.addView(new PreviewWallpaper(this, colors.dark), new FrameLayout.LayoutParams(-1, -1));
         int height = getResources().getConfiguration().screenHeightDp;
-        int sceneHeight = dualPane ? Math.max(305, Math.min(438, height * 42 / 100)) : 305;
+        int sceneHeight = dualPane ? Math.max(345, Math.min(445, height * 44 / 100)) : 345;
         LinearLayout.LayoutParams stage = new LinearLayout.LayoutParams(-1, dp(sceneHeight));
         stage.topMargin = dp(10);
         previewPanel.addView(previewScene, stage);
@@ -698,10 +776,10 @@ public class MainActivity extends Activity {
     }
 
     private void pickApp() {
-        pickApp(getString(R.string.add_ring_app), shortcuts.available(), shortcuts::add, true);
+        pickApp(getString(R.string.add_ring_app), shortcuts::available, shortcuts::add, true);
     }
 
-    private void pickApp(String title, List<Shortcuts.Entry> available, Predicate<Shortcuts.Entry> addApp,
+    private void pickApp(String title, Supplier<List<Shortcuts.Entry>> loadAvailable, Predicate<Shortcuts.Entry> addApp,
             boolean ringPicker) {
         Dialog dialog = new Dialog(this);
         dialog.setTitle(title);
@@ -720,7 +798,26 @@ public class MainActivity extends Activity {
 
         ArrayAdapter<Shortcuts.Entry> adapter = new ArrayAdapter<Shortcuts.Entry>(this, 0) {
             @Override public View getView(int position, View recycled, ViewGroup parent) {
-                return appRow(getItem(position));
+                Shortcuts.Entry item = getItem(position);
+                LinearLayout row = recycled instanceof LinearLayout ? (LinearLayout) recycled : appRow(item);
+                ImageView iconView = (ImageView) row.getChildAt(0);
+                TextView labelView = (TextView) row.getChildAt(1);
+                labelView.setText(item.label);
+                iconView.setImageTintList(item.tool != null ? ColorStateList.valueOf(colors.accent) : null);
+                iconView.setTag(item.id);
+                Drawable ready = item.icon != null ? item.icon : shortcuts.cachedIcon(item.id);
+                iconView.setImageDrawable(ready);
+                if (ready == null && !background.isShutdown()) {
+                    background.execute(() -> {
+                        Drawable loaded = shortcuts.loadIcon(item.id);
+                        runOnUiThread(() -> {
+                            if (dialog.isShowing() && item.id.equals(iconView.getTag())) {
+                                iconView.setImageDrawable(loaded);
+                            }
+                        });
+                    });
+                }
+                return row;
             }
         };
         ListView results = new ListView(this);
@@ -735,19 +832,20 @@ public class MainActivity extends Activity {
         results.setAdapter(adapter);
         panel.addView(results, new LinearLayout.LayoutParams(-1, 0, 1));
         if (!ringPicker) {
-            appStatus.setText(R.string.no_apps);
             appStatus.setGravity(Gravity.CENTER);
             panel.addView(appStatus, new LinearLayout.LayoutParams(-1, 0, 1));
             results.setEmptyView(appStatus);
         }
         panel.addView(Ui.action(this, getString(R.string.close), false, dialog::dismiss));
 
+        List<Shortcuts.Entry> available = new ArrayList<>();
+        boolean[] loading = {true};
         Runnable refreshResults = () -> {
             String term = search.getText().toString().trim().toLowerCase(Locale.ROOT);
             boolean full = ringPicker && shortcuts.selected().size() >= Shortcuts.LIMIT;
             adapter.setNotifyOnChange(false);
             adapter.clear();
-            if (!full) {
+            if (!full && !loading[0]) {
                 for (Shortcuts.Entry app : available) {
                     if (app.label.toLowerCase(Locale.ROOT).contains(term)
                             || app.id.toLowerCase(Locale.ROOT).contains(term)) {
@@ -758,8 +856,10 @@ public class MainActivity extends Activity {
             if (ringPicker) {
                 for (CheckBox choice : toolOptions) choice.setEnabled(choice.isChecked() || !full);
                 appStatus.setText(full ? getString(R.string.ring_item_limit, Shortcuts.LIMIT)
-                        : adapter.isEmpty() ? getString(R.string.no_apps) : "");
+                        : !loading[0] && adapter.isEmpty() ? getString(R.string.no_apps) : "");
                 appStatus.setVisibility(appStatus.length() > 0 ? View.VISIBLE : View.GONE);
+            } else {
+                appStatus.setText(loading[0] ? "" : getString(R.string.no_apps));
             }
             adapter.notifyDataSetChanged();
         };
@@ -796,6 +896,18 @@ public class MainActivity extends Activity {
             @Override public void afterTextChanged(Editable text) { }
         });
         refreshResults.run();
+        if (!background.isShutdown()) {
+            background.execute(() -> {
+                List<Shortcuts.Entry> loaded = loadAvailable.get();
+                runOnUiThread(() -> {
+                    if (!dialog.isShowing() || isFinishing() || isDestroyed()) return;
+                    available.clear();
+                    available.addAll(loaded);
+                    loading[0] = false;
+                    refreshResults.run();
+                });
+            });
+        }
         dialog.setContentView(panel);
         dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
@@ -839,15 +951,13 @@ public class MainActivity extends Activity {
     }
 
     private void toggleDock() {
-        Intent dock = new Intent(this, DockService.class);
         if (DockService.running) {
-            stopService(dock);
+            DockService.stop(this);
         } else if (Settings.canDrawOverlays(this)) {
-            startForegroundService(dock);
+            DockService.start(this);
         } else {
             openOverlaySettings();
         }
-        content.postDelayed(this::render, 250);
     }
 
     private void openOverlaySettings() {

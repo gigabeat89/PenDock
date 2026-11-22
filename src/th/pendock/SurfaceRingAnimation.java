@@ -53,7 +53,8 @@ final class SurfaceRingAnimation extends SurfaceView implements SurfaceHolder.Ca
         renderer.start();
         Surface surface = holder.getSurface();
         Handler draw = new Handler(renderer.getLooper());
-        float refreshRate = getDisplay().getMode().getRefreshRate();
+        android.view.Display display = getDisplay();
+        float refreshRate = display == null ? 60f : display.getMode().getRefreshRate();
         long interval = Math.round(1_000_000_000d / Math.min(120, Math.max(24, refreshRate)));
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         if (entering) {
@@ -127,9 +128,11 @@ final class SurfaceRingAnimation extends SurfaceView implements SurfaceHolder.Ca
     }
 
     void stop() {
+        getHolder().removeCallback(this);
         synchronized (surfaceLock) {
             stopped = true;
             ready = false;
+            if (!artwork.isRecycled()) artwork.recycle();
         }
         renderer.quitSafely();
     }

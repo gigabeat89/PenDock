@@ -12,7 +12,9 @@ Download the APK from [GitHub Releases](https://github.com/gigabeat89/PenDock/re
 
 Tap outside the ring or double-tap the stylus again to dismiss it. With **Use only the pen in the ring** enabled, touching the screen or clicking the touchpad dismisses the ring. Turn that setting off to select actions with touch or a touchpad. Enable **Open the ring only near the screen** to require the tablet to detect the pen tip near the display. With this option off, a double-tap opens the ring at the center of the screen when the tablet cannot locate the pen tip.
 
-The gear icon opens **Settings**, where you can choose English or Thai and set the theme to Light, Dark, or System. New installations default to English and Light. Enable **Laser pointer** to mark the stylus position while hovering over PenDock or its ring.
+Under **Pen controls**, you can also choose the **Ring size** (Small, Normal, or Large), set **Open shortcuts as** (Floating, Split screen, or Full screen), adjust the **Floating window size** when Floating is selected, and keep **Start ring automatically after reboot** enabled. You can also add the **PenDock** Quick Settings tile in Control Panel to toggle the ring on or off.
+
+The gear icon opens **Settings**, where you can choose English or Thai, set the theme to Light, Dark, or System, and **Check for updates** from GitHub Releases. New installations default to English and Light.
 
 ## Pen battery widgets
 
@@ -28,7 +30,9 @@ Use the **Permissions** panel to enable the services for the features you use.
 | --- | --- |
 | Screenshot and screen lock | Enable **PenDock · Screenshot and screen lock** in Accessibility. The ring calls the system screenshot and lock actions. |
 | Floating window | Enable **PenDock · Window status** and **PenDock · Screenshot and screen lock**. The floating-window tool is disabled on Home, when the current app is already floating, or when the app does not support floating windows. Opening a shortcut as a floating window can fall back to full screen if the system or app restricts floating windows. |
-| Circle to Search | Enable **PenDock · Circle to Search**. This requires Android 11 or later and a compatible version of the Google app. Circle an area with the pen to send only the circled image to Google Lens. The cropped image stays in the app cache for up to one day. |
+| Split screen | Enable **PenDock · Window status** and **PenDock · Screenshot and screen lock**. Places the current app in the primary split half and opens a second-app picker on the other half. Also available as a shortcut launch mode to pair a pinned app alongside the current app. |
+| Laser pointer | Opens a full-screen transparent presentation laser pointer with a glowing hover dot, fading drag trail, and selectable colors (red, green, blue). Double-tap the stylus, press Back, or tap **Close** to exit. |
+| Circle to Search | Enable **PenDock · Circle to Search** (Android 11 or later). Circle an area with the pen, then choose **Lens** (when Google Lens is installed), **Share**, **Copy**, or **Save** to `Pictures/PenDock`. Temporary cropped images stay in the app cache for up to one day. |
 | Excluded apps | Enable **PenDock · Window status**, then add apps in **Excluded apps** to keep PenDock from opening over them. GoPaint, Notepad, and Notes are excluded by default when installed. Your saved exclusions are preserved when you update PenDock. |
 
 If Huawei stops PenDock in the background, use **Battery → Launch manager** to turn off **Manage automatically** for PenDock and enable **Run in background**. To keep PenDock open when you tap **Close all**, swipe down on its card in Recent tasks to lock it. The info buttons in PenDock show both steps.
@@ -45,7 +49,7 @@ The APK is written to `build/PenDock.apk`. The script generates a local test sig
 
 - Package ID `th.pendock`
 - Minimum Android API level 29
-- The app does not request Internet access. The window services use app and activity names, focus, and window geometry. Draft notes stay in the app's private storage.
+- Internet access is used only when you tap **Check for updates** in Settings to query GitHub Releases. The window services use app and activity names, focus, and window geometry. Draft notes stay in the app's private storage.
 
 ## License
 

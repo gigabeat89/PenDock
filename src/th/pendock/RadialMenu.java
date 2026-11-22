@@ -45,7 +45,6 @@ final class RadialMenu extends FrameLayout {
     private final Region segmentHitArea = new Region();
     private final float fallbackX, fallbackY;
     private final TextView hub, batteryStatus;
-    private final LaserPointer laser;
     private final Runnable close;
     private final boolean penOnly, preview, requireHover, useSeparateSurface;
     private final float maxScale;
@@ -71,28 +70,30 @@ final class RadialMenu extends FrameLayout {
     private float batteryExpansion;
 
     RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
-            Runnable lock, Runnable capture, Runnable circleSearch, Runnable close, List<Shortcuts.Entry> entries,
-            Consumer<Shortcuts.Entry> launch, String battery, Runnable floatActive, boolean alreadyWindowed) {
-        this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, close,
-                entries, launch, battery, floatActive, alreadyWindowed, false);
+            Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode, Runnable close,
+            List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
+            Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit) {
+        this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, laserMode, close,
+                entries, launch, battery, floatActive, alreadyWindowed, splitActive, alreadySplit, false);
     }
 
     static RadialMenu preview(Context context, List<Shortcuts.Entry> entries) {
         Runnable sample = () -> { };
-        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample,
-                entries, app -> { }, "—", sample, false, true);
+        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample,
+                entries, app -> { }, "—", sample, false, sample, false, true);
     }
 
     private RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
-            Runnable lock, Runnable capture, Runnable circleSearch, Runnable close, List<Shortcuts.Entry> entries,
-            Consumer<Shortcuts.Entry> launch, String battery, Runnable floatActive, boolean alreadyWindowed,
+            Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode, Runnable close,
+            List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
+            Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             boolean preview) {
         super(context);
         this.preview = preview;
         // Huawei can slow the overlay's UI frame cadence when no PenDock Accessibility service is bound.
         useSeparateSurface = !preview && "huawei".equalsIgnoreCase(Build.MANUFACTURER)
                 && !WindowModeMonitor.isReady() && !SystemScreenshot.isReady() && !CircleCaptureService.isReady();
-        maxScale = preview ? 1.3f : 1f;
+        maxScale = RingConfig.ringScale(context);
         colors = Ui.colors(context);
         this.fallbackX = fallbackX;
         this.fallbackY = fallbackY;
@@ -146,6 +147,12 @@ final class RadialMenu extends FrameLayout {
                         if (action == null) label = context.getString(alreadyWindowed
                                 ? R.string.float_already : R.string.float_unavailable);
                         break;
+                    case SPLIT_SCREEN:
+                        action = splitActive;
+                        if (action == null) label = context.getString(alreadySplit
+                                ? R.string.split_already : R.string.split_unavailable);
+                        break;
+                    case LASER_POINTER: action = laserMode; break;
                 }
             }
             addButton(index, entry.icon, label, action);
@@ -154,6 +161,9 @@ final class RadialMenu extends FrameLayout {
             } else if (tool == Shortcuts.Tool.FLOAT_WINDOW && action == null) {
                 buttons[index].setContentDescription(context.getString(alreadyWindowed
                         ? R.string.float_already_description : R.string.float_unavailable_description));
+            } else if (tool == Shortcuts.Tool.SPLIT_SCREEN && action == null) {
+                buttons[index].setContentDescription(context.getString(alreadySplit
+                        ? R.string.split_already_description : R.string.split_unavailable_description));
             }
         }
         hub = Ui.text(context, "PenDock", 13, colors.text, true);
@@ -169,7 +179,6 @@ final class RadialMenu extends FrameLayout {
         batteryStatus.setVisibility(INVISIBLE);
         setBattery(battery);
         ring.addView(batteryStatus, new LayoutParams(hubHalfWidth * 2, dp(22)));
-        laser = new LaserPointer(this);
     }
 
     void setBattery(String battery) {
@@ -259,7 +268,6 @@ final class RadialMenu extends FrameLayout {
         if (focused) {
             if (outerRadius > 0 && !revealed && !closing) prepareReveal();
         } else {
-            laser.hide();
             removeCallbacks(fallback);
             if (!preview && !closing && isAttachedToWindow()) post(close);
         }
@@ -281,7 +289,6 @@ final class RadialMenu extends FrameLayout {
     @Override public boolean dispatchHoverEvent(MotionEvent event) {
         int action = event.getActionMasked();
         if (closing) return true;
-        laser.update(event);
         if (action == MotionEvent.ACTION_HOVER_EXIT) {
             hoverPending = false;
             showBattery(false, true);
@@ -358,7 +365,6 @@ final class RadialMenu extends FrameLayout {
                 if (pressedPointer != -1) return true;
                 pressedPointer = pointerId;
                 hoverPending = false;
-                laser.hide();
                 showBattery(false, false);
                 waitingForHover = false;
                 pressed = sector;
@@ -639,7 +645,8 @@ final class RadialMenu extends FrameLayout {
             return;
         }
         Runnable action = actions[index];
-        if (action != null) finish(action, tools[index] == Shortcuts.Tool.FLOAT_WINDOW ? 110 : 175);
+        if (action != null) finish(action,
+                tools[index] == Shortcuts.Tool.FLOAT_WINDOW || tools[index] == Shortcuts.Tool.SPLIT_SCREEN ? 110 : 175);
     }
 
     void dismiss() {
@@ -653,7 +660,6 @@ final class RadialMenu extends FrameLayout {
         if (stopSurfaceAnimation()) ring.setVisibility(VISIBLE);
         opening = false;
         hoverPending = false;
-        laser.hide();
         if (!revealed || !ValueAnimator.areAnimatorsEnabled()) {
             next.run();
             return;

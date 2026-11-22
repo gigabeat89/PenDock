@@ -4,7 +4,6 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.ActivityOptions;
 import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -13,10 +12,7 @@ import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
 
 public class SystemScreenshot extends AccessibilityService {
-    private static final String TRACK_ACTIVE_APP = "track_active_app";
     private static SystemScreenshot connected;
-    private ComponentName active;
-    private Intent floatingIntent;
     private boolean tracking;
     private String homePackage;
     private Intent homeIntent;
@@ -26,22 +22,12 @@ public class SystemScreenshot extends AccessibilityService {
     private final Runnable completeSwitch = this::finishHomeSwitch;
     static boolean isReady() { return connected != null; }
 
-    static boolean tracksActiveApp(Context context) {
-        return WindowModeMonitor.isReady() || context.getSharedPreferences("tools", Context.MODE_PRIVATE)
-                .getBoolean(TRACK_ACTIVE_APP, false);
+    static boolean tracksActiveApp() {
+        return WindowModeMonitor.isReady();
     }
 
     static void refreshTracking() {
-        if (connected != null && connected.tracking != tracksActiveApp(connected)) connected.configure();
-    }
-
-    static String foregroundPackage() {
-        return connected == null || connected.active == null ? null : connected.active.getPackageName();
-    }
-
-    static Intent floatingActiveApp() {
-        return connected == null || connected.floatingIntent == null
-                ? null : new Intent(connected.floatingIntent);
+        if (connected != null && connected.tracking != tracksActiveApp()) connected.configure();
     }
 
     static boolean take() {
@@ -52,11 +38,15 @@ public class SystemScreenshot extends AccessibilityService {
         return connected != null && connected.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
     }
 
+    static boolean toggleSplitScreen() {
+        return connected != null && connected.performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN);
+    }
+
     static boolean switchToHome(ComponentName focusedActivity, Runnable action) {
         SystemScreenshot service = connected;
         if (service == null || !service.tracking || service.homeIntent == null) return false;
         service.homeAction = action;
-        service.origin = focusedActivity == null ? service.active : focusedActivity;
+        service.origin = focusedActivity;
         try {
             service.startActivity(service.homeIntent,
                     ActivityOptions.makeCustomAnimation(service, 0, 0).toBundle());
@@ -76,15 +66,11 @@ public class SystemScreenshot extends AccessibilityService {
         Runnable action = homeAction;
         homeAction = null;
         if (action == null || !tracking) return;
-        if (WindowModeMonitor.isReady()) {
-            WindowModeMonitor.FocusedApp focused = WindowModeMonitor.focusedApp();
-            if (focused != null && focused.activity != null
-                    && !focused.activity.getPackageName().equals(homePackage)
-                    && !focused.activity.getPackageName().equals("com.huawei.android.launcher")
-                    && !focused.activity.equals(origin)) return;
-        } else if (active != null && !active.equals(origin)) {
-            return;
-        }
+        WindowModeMonitor.FocusedApp focused = WindowModeMonitor.focusedApp();
+        if (focused != null && focused.activity != null
+                && !focused.activity.getPackageName().equals(homePackage)
+                && !focused.activity.getPackageName().equals("com.huawei.android.launcher")
+                && !focused.activity.equals(origin)) return;
         action.run();
     }
 
@@ -95,8 +81,6 @@ public class SystemScreenshot extends AccessibilityService {
     }
 
     private void configure() {
-        active = null;
-        floatingIntent = null;
         homeAction = null;
         main.removeCallbacksAndMessages(null);
         Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
@@ -106,42 +90,21 @@ public class SystemScreenshot extends AccessibilityService {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
         AccessibilityServiceInfo info = getServiceInfo();
         if (info == null) return;
-        tracking = tracksActiveApp(this);
+        tracking = tracksActiveApp();
         info.eventTypes = tracking ? AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED : 0;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         setServiceInfo(info);
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!tracking || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                || event.getPackageName() == null || event.getClassName() == null) return;
+        if (!tracking || homeAction == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || event.getPackageName() == null) return;
         String pkg = event.getPackageName().toString();
         if (pkg.equals(homePackage) || pkg.equals("com.huawei.android.launcher")) {
-            active = null;
-            floatingIntent = null;
-            if (homeAction != null) {
-                main.removeCallbacks(completeSwitch);
-                // Let the launcher finish taking focus before the existing task is reopened.
-                main.postDelayed(completeSwitch, 32);
-            }
-            return;
+            main.removeCallbacks(completeSwitch);
+            // Let the launcher finish taking focus before the existing task is reopened.
+            main.postDelayed(completeSwitch, 32);
         }
-        String className = ActiveWindow.fullClassName(pkg, event.getClassName().toString());
-        if (className.isEmpty()) return;
-        ComponentName next = new ComponentName(pkg, className);
-        if (next.equals(active)) return;
-        try {
-            getPackageManager().getActivityInfo(next, 0);
-        } catch (PackageManager.NameNotFoundException ignored) {
-            // Ignore PenDock's own overlay and dialogs from the already tracked app.
-            if (!pkg.equals(getPackageName()) && (active == null || !pkg.equals(active.getPackageName()))) {
-                active = null;
-                floatingIntent = null;
-            }
-            return;
-        }
-        active = next;
-        floatingIntent = ActiveWindow.floatingLauncher(this, next);
     }
 
     @Override public void onInterrupt() { }

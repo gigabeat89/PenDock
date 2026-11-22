@@ -7,13 +7,19 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.XmlResourceParser;
+import android.util.LruCache;
 import java.io.IOException;
 import org.xmlpull.v1.XmlPullParserException;
 
 final class ActiveWindow {
     private static final String ANDROID = "http://schemas.android.com/apk/res/android";
+    private static final LruCache<ComponentName, Boolean> RESIZABLE_CACHE = new LruCache<>(64);
 
     private ActiveWindow() { }
+
+    static void clearCache() {
+        RESIZABLE_CACHE.evictAll();
+    }
 
     static Intent floatingLauncher(Context context, ComponentName active) {
         if (active == null) return null;
@@ -36,6 +42,14 @@ final class ActiveWindow {
     }
 
     private static boolean supportsMultiWindow(PackageManager packages, ComponentName active) {
+        Boolean cached = RESIZABLE_CACHE.get(active);
+        if (cached != null) return cached;
+        boolean result = readSupportsMultiWindow(packages, active);
+        RESIZABLE_CACHE.put(active, result);
+        return result;
+    }
+
+    private static boolean readSupportsMultiWindow(PackageManager packages, ComponentName active) {
         try {
             ActivityInfo info = packages.getActivityInfo(active, 0);
             String className = info.targetActivity == null ? info.name : info.targetActivity;

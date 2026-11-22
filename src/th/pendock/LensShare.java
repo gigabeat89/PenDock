@@ -33,6 +33,17 @@ final class LensShare {
         }
     }
 
+    static void share(Context context, Uri crop, String title) {
+        Intent send = new Intent(Intent.ACTION_SEND)
+                .setType("image/png")
+                .putExtra(Intent.EXTRA_STREAM, crop)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        send.setClipData(ClipData.newRawUri("PenDock", crop));
+        Intent chooser = Intent.createChooser(send, title)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        context.startActivity(chooser);
+    }
+
     private static Intent intent() {
         return new Intent(Intent.ACTION_SEND).setType("image/png").setClassName(GOOGLE, LENS);
     }

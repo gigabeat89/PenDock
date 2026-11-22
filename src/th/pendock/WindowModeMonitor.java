@@ -34,7 +34,7 @@ public class WindowModeMonitor extends AccessibilityService {
     }
 
     private void configure() {
-        tracking = SystemScreenshot.tracksActiveApp(this)
+        tracking = SystemScreenshot.tracksActiveApp()
                 || !new ExcludedApps(this).packages().isEmpty();
         if (!tracking) activities.evictAll();
         AccessibilityServiceInfo info = getServiceInfo();
@@ -54,18 +54,33 @@ public class WindowModeMonitor extends AccessibilityService {
                 window.getBoundsInScreen(bounds);
                 if (bounds.isEmpty()) return null;
                 Rect display = usableDisplay();
+                boolean spansWidth = spansAxis(bounds.left, bounds.right, display.left, display.right);
+                boolean spansHeight = spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
                 // Huawei can letterbox a fullscreen app on one axis, especially in Magic Window.
-                boolean spansDisplay = spansAxis(bounds.left, bounds.right, display.left, display.right)
-                        || spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
-                boolean windowed = window.isInPictureInPictureMode()
-                        || !spansDisplay;
+                boolean spansDisplay = spansWidth || spansHeight;
+                boolean windowed = window.isInPictureInPictureMode() || !spansDisplay;
+                boolean split = !windowed && (spansWidth != spansHeight)
+                        && isDockedSplit(bounds, display, spansWidth);
                 App app = activities.get(window.getId());
-                return new FocusedApp(app, windowed);
+                return new FocusedApp(app, windowed, split);
             }
             return null;
         } finally {
             for (AccessibilityWindowInfo window : windows) window.recycle();
         }
+    }
+
+    private boolean isDockedSplit(Rect bounds, Rect display, boolean spansWidth) {
+        if (spansWidth) {
+            int tolerance = Math.max(Ui.dp(this, 18), display.height() / 20);
+            boolean touchesEdge = Math.abs(bounds.top - display.top) <= tolerance
+                    || Math.abs(bounds.bottom - display.bottom) <= tolerance;
+            return touchesEdge && bounds.height() <= display.height() * 78 / 100;
+        }
+        int tolerance = Math.max(Ui.dp(this, 18), display.width() / 20);
+        boolean touchesEdge = Math.abs(bounds.left - display.left) <= tolerance
+                || Math.abs(bounds.right - display.right) <= tolerance;
+        return touchesEdge && bounds.width() <= display.width() * 78 / 100;
     }
 
     private boolean spansAxis(int start, int end, int displayStart, int displayEnd) {
@@ -78,11 +93,13 @@ public class WindowModeMonitor extends AccessibilityService {
         final ComponentName activity;
         final Intent floatingIntent;
         final boolean alreadyWindowed;
+        final boolean alreadySplit;
 
-        FocusedApp(App app, boolean windowed) {
+        FocusedApp(App app, boolean windowed, boolean split) {
             activity = app == null ? null : app.activity;
             floatingIntent = app == null || app.floatingIntent == null ? null : new Intent(app.floatingIntent);
             alreadyWindowed = windowed;
+            alreadySplit = split;
         }
     }
 

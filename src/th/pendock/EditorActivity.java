@@ -107,8 +107,9 @@ public class EditorActivity extends Activity {
     }
 
     private void updateEraser() {
-        eraser.setBackground(Ui.shape(this, sheet.erase ? colors.accentWash : colors.surface, 14));
-        eraser.setTextColor(sheet.erase ? colors.background : colors.text);
+        eraser.setBackground(Ui.pressable(this, sheet.erase ? colors.accentWash : colors.surface, 12,
+                sheet.erase ? colors.accent : colors.border));
+        eraser.setTextColor(sheet.erase ? colors.accent : colors.text);
         eraser.setSelected(sheet.erase);
     }
 

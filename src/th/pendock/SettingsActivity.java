@@ -23,10 +23,17 @@ import android.widget.Toast;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class SettingsActivity extends Activity {
     private static final String SUPPORT_EMAIL = "gigabeat.is@gmail.com";
     private Appearance.Palette colors;
+    private final ExecutorService updates = Executors.newSingleThreadExecutor();
+    private TextView checkUpdateButton;
+    private TextView updateStatus;
+    private boolean checkingUpdate;
+    private String installedVersion = "";
 
     @Override protected void attachBaseContext(Context base) {
         super.attachBaseContext(Appearance.localize(base));
@@ -89,13 +96,92 @@ public class SettingsActivity extends Activity {
         label.setPadding(Ui.dp(this, 12), 0, 0, 0);
         label.addView(Ui.text(this, "PenDock", 20, colors.text, true));
         try {
-            String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-            label.addView(Ui.text(this, getString(R.string.app_version, version), 13, colors.muted, false));
+            installedVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            label.addView(Ui.text(this, getString(R.string.app_version, installedVersion), 13, colors.muted, false));
         } catch (PackageManager.NameNotFoundException ignored) { }
         brand.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         about.addView(brand);
         add(about, Ui.text(this, getString(R.string.app_description), 14, colors.muted, false), 12);
+        updateStatus = Ui.text(this, "", 13, colors.muted, false);
+        updateStatus.setVisibility(View.GONE);
+        add(about, updateStatus, 10);
+        checkUpdateButton = Ui.action(this, getString(R.string.check_updates), false, this::checkForUpdates);
+        add(about, checkUpdateButton, 12);
         return about;
+    }
+
+    private void checkForUpdates() {
+        if (checkingUpdate || updates.isShutdown()) return;
+        checkingUpdate = true;
+        checkUpdateButton.setEnabled(false);
+        checkUpdateButton.setText(R.string.checking_updates);
+        updateStatus.setVisibility(View.GONE);
+        String current = installedVersion;
+        updates.execute(() -> {
+            try {
+                UpdateChecker.Release latest = UpdateChecker.fetchLatest(current);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    finishUpdateCheck();
+                    if (UpdateChecker.isNewer(latest.version, current)) {
+                        showUpdateDialog(latest);
+                    } else {
+                        updateStatus.setTextColor(colors.pick(0xff1b624e, 0xffa0e1c8));
+                        updateStatus.setText(getString(R.string.update_up_to_date,
+                                current.isEmpty() ? latest.version : current));
+                        updateStatus.setVisibility(View.VISIBLE);
+                    }
+                });
+            } catch (IOException | RuntimeException failure) {
+                android.util.Log.w("PenDock", "Update check failed", failure);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    finishUpdateCheck();
+                    updateStatus.setTextColor(colors.pick(0xffad293c, 0xffff9eaa));
+                    updateStatus.setText(R.string.update_check_failed);
+                    updateStatus.setVisibility(View.VISIBLE);
+                });
+            }
+        });
+    }
+
+    private void finishUpdateCheck() {
+        checkingUpdate = false;
+        checkUpdateButton.setEnabled(true);
+        checkUpdateButton.setText(R.string.check_updates);
+    }
+
+    private void showUpdateDialog(UpdateChecker.Release release) {
+        String current = installedVersion.isEmpty() ? "—" : installedVersion;
+        StringBuilder message = new StringBuilder(
+                getString(R.string.update_available_summary, current, release.version));
+        if (!release.notes.isEmpty()) {
+            message.append("\n\n").append(release.notes);
+        }
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.update_available_title)
+                .setMessage(message.toString())
+                .setNegativeButton(R.string.close, null);
+        if (release.apkUrl != null) {
+            dialog.setPositiveButton(R.string.update_download_apk, (d, which) -> openUrl(release.apkUrl));
+            dialog.setNeutralButton(R.string.update_open_github, (d, which) -> openUrl(release.pageUrl));
+        } else {
+            dialog.setPositiveButton(R.string.update_open_github, (d, which) -> openUrl(release.pageUrl));
+        }
+        dialog.show();
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException unavailable) {
+            Toast.makeText(this, R.string.browser_unavailable, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override protected void onDestroy() {
+        updates.shutdownNow();
+        super.onDestroy();
     }
 
     private void addDropdown(LinearLayout preferences, int title, String key, String current,
