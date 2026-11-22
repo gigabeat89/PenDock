@@ -1,75 +1,92 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/battery_widget_card"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_card_light"
-    android:orientation="vertical"
-    android:paddingHorizontal="16dp"
-    android:paddingVertical="14dp">
-    <TextView
-        android:id="@+id/battery_caption"
+    android:padding="4dp">
+    <FrameLayout
+        android:id="@+id/battery_widget_surface"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:includeFontPadding="false"
-        android:fontFamily="sans-serif-medium"
-        android:textSize="13sp"
-        android:importantForAccessibility="no" />
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="46dp"
-        android:layout_marginTop="2dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-        <TextView
-            android:id="@+id/battery_value"
-            android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_card_light"
+        android:clipToOutline="true">
+        <include
+            layout="@layout/battery_widget_artwork"
+            android:layout_width="match_parent"
+            android:layout_height="145dp"
+            android:layout_gravity="bottom" />
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:gravity="center_vertical"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:fontFamily="sans-serif"
-            android:textStyle="bold"
-            android:textSize="42sp"
-            android:autoSizeTextType="uniform"
-            android:autoSizeMinTextSize="16sp"
-            android:autoSizeMaxTextSize="42sp"
-            android:autoSizeStepGranularity="1sp"
-            android:importantForAccessibility="no" />
-        <ImageView
-            android:id="@+id/battery_charging"
-            android:layout_width="12dp"
-            android:layout_height="18dp"
-            android:layout_marginStart="5dp"
-            android:visibility="gone"
-            android:importantForAccessibility="no" />
-    </LinearLayout>
-    <TextView
-        android:id="@+id/battery_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:includeFontPadding="false"
-        android:fontFamily="sans-serif-medium"
-        android:textSize="13sp"
-        android:visibility="gone"
-        android:importantForAccessibility="no" />
-    <ImageView
-        android:id="@+id/battery_meter"
-        android:layout_width="match_parent"
-        android:layout_height="4dp"
-        android:layout_marginTop="5dp"
-        android:scaleType="fitXY"
-        android:importantForAccessibility="no" />
-    <ImageView
-        android:id="@+id/battery_pen"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="6dp"
-        android:scaleType="fitCenter"
-        android:importantForAccessibility="no" />
-</LinearLayout>
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="14dp">
+            <TextView
+                android:id="@+id/battery_caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:fontFamily="sans-serif-medium"
+                android:textSize="13sp"
+                android:importantForAccessibility="no" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="2dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/battery_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center_vertical"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif"
+                    android:textStyle="bold"
+                    android:textSize="42sp"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="16sp"
+                    android:autoSizeMaxTextSize="42sp"
+                    android:autoSizeStepGranularity="1sp"
+                    android:importantForAccessibility="no" />
+                <ImageView
+                    android:id="@+id/battery_charging"
+                    android:layout_width="12dp"
+                    android:layout_height="18dp"
+                    android:layout_marginStart="5dp"
+                    android:visibility="gone"
+                    android:importantForAccessibility="no" />
+            </LinearLayout>
+            <TextView
+                android:id="@+id/battery_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:fontFamily="sans-serif-medium"
+                android:textSize="13sp"
+                android:visibility="gone"
+                android:importantForAccessibility="no" />
+            <ImageView
+                android:id="@+id/battery_meter"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="5dp"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" />
+            <ImageView
+                android:id="@+id/battery_pen"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="25dp"
+                android:scaleType="fitCenter"
+                android:importantForAccessibility="no" />
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

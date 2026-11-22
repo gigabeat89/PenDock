@@ -16,7 +16,7 @@ rm -rf build/generated build/classes build/dex
 mkdir -p build/generated build/classes build/dex
 "$build_tools/aapt2" compile --dir res -o build/resources.zip
 "$build_tools/aapt2" link -I "$android_jar" --manifest AndroidManifest.xml \
-    --version-code 48 --version-name 1.0.2 --java build/generated \
+    --version-code 49 --version-name 1.0.3 --java build/generated \
     -o build/resources.apk build/resources.zip
 find src build/generated -name '*.java' > build/sources.txt
 javac --release 8 -encoding UTF-8 -classpath "$android_jar" -d build/classes @build/sources.txt

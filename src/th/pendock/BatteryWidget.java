@@ -116,8 +116,10 @@ public abstract class BatteryWidget extends AppWidgetProvider {
 
     private static RemoteViews card(Context context, Card shape, PenBattery battery, boolean dark) {
         RemoteViews views = new RemoteViews(context.getPackageName(), shape.layout);
-        views.setInt(R.id.battery_widget_card, "setBackgroundResource",
+        views.setInt(R.id.battery_widget_surface, "setBackgroundResource",
                 dark ? R.drawable.widget_card_dark : R.drawable.widget_card_light);
+        views.setImageViewResource(R.id.battery_widget_artwork,
+                dark ? R.drawable.widget_waves_dark : R.drawable.widget_waves_light);
         BatteryWidgetArt art = new BatteryWidgetArt(battery, dark);
         boolean available = battery.available();
         views.setTextViewText(R.id.battery_caption, available ? battery.model : "Unavailable");
@@ -135,7 +137,8 @@ public abstract class BatteryWidget extends AppWidgetProvider {
             if (battery.charging) views.setImageViewBitmap(R.id.battery_charging, art.bolt());
             views.setViewVisibility(R.id.battery_meter, available ? View.VISIBLE : View.GONE);
             if (available) views.setImageViewBitmap(R.id.battery_meter, art.meter(battery.level));
-            views.setImageViewBitmap(R.id.battery_pen, BatteryWidgetArt.pen(context, shape == Card.TALL));
+            views.setImageViewBitmap(R.id.battery_pen, shape == Card.SQUARE ? BatteryWidgetArt.pen(context)
+                    : BatteryWidgetArt.penCloseUp(context, shape == Card.TALL));
         }
         String description = battery.available()
                 ? battery.model + ", " + battery.level + " percent" + (battery.charging ? ", charging" : "")

@@ -16,6 +16,7 @@ import android.graphics.Typeface;
 final class BatteryWidgetArt {
     private static final Typeface BOLD = Typeface.create("sans-serif", Typeface.BOLD);
     private static Bitmap horizontalPen;
+    private static Bitmap closeUpPen;
     private static Bitmap verticalPen;
 
     final int ink, caption, track, accent;
@@ -94,14 +95,24 @@ final class BatteryWidgetArt {
         canvas.drawPath(path, paint);
     }
 
-    static Bitmap pen(Context context, boolean tall) {
+    static Bitmap pen(Context context) {
         if (horizontalPen == null) horizontalPen = loadPen(context);
-        if (!tall) return horizontalPen;
+        return horizontalPen;
+    }
+
+    static Bitmap penCloseUp(Context context, boolean tall) {
+        if (closeUpPen == null) {
+            Bitmap full = pen(context);
+            // Remove part of the transparent margin beyond the nib without cropping its shadow.
+            int width = Math.round(full.getWidth() * .91f);
+            closeUpPen = Bitmap.createBitmap(full, 0, 0, width, full.getHeight());
+        }
+        if (!tall) return closeUpPen;
         if (verticalPen == null) {
             Matrix rotation = new Matrix();
             rotation.setRotate(-90);
-            verticalPen = Bitmap.createBitmap(horizontalPen, 0, 0, horizontalPen.getWidth(),
-                    horizontalPen.getHeight(), rotation, true);
+            verticalPen = Bitmap.createBitmap(closeUpPen, 0, 0, closeUpPen.getWidth(),
+                    closeUpPen.getHeight(), rotation, true);
         }
         return verticalPen;
     }
