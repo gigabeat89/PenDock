@@ -1,6 +1,6 @@
 # PenDock
 
-PenDock is a customizable M-Pencil shortcut ring for compatible Huawei MatePad tablets. Double-tap the side of the stylus to open the ring near the pen tip and launch favorite apps or use system tools.
+PenDock brings a customizable M-Pencil shortcut ring and a resizable stylus battery widget to compatible Huawei MatePad tablets. Double-tap the side of the stylus to open the ring near the pen tip and launch favorite apps or use system tools.
 
 ## Install
 
@@ -16,7 +16,9 @@ The gear icon opens **Settings**, where you can choose English or Thai and set t
 
 ## Pen battery widgets
 
-From the Home screen widget picker, add **Pen Battery** in 1×1, 1×2, 1×3, 2×1, or 3×1 (rows × columns). Widgets use PenDock's appearance setting and show their labels in English. The model, percentage, and charging indicator use the information reported by the tablet. A red meter indicates less than 20%, and **Unavailable** appears when the tablet does not report a battery level.
+Add **Pen Battery (Resizable)** from the Home screen widget picker. It starts at 1×1. On launchers that support resizing, press and hold the widget and drag a handle to switch between the compact, large square, wide, and tall layouts.
+
+The widget follows PenDock’s appearance setting and uses English labels. It displays the model, battery percentage, and charging status reported by the tablet. The meter turns red below 20%. If battery data is missing, it displays **Unavailable**.
 
 ## Tools and permissions
 
