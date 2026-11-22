@@ -1,13 +1,16 @@
 package th.pendock;
 
+import android.animation.TimeInterpolator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Region;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -25,6 +28,7 @@ final class RadialMenu extends FrameLayout {
     private static final PathInterpolator OPEN = new PathInterpolator(.22f, .55f, .32f, 1f);
     private static final PathInterpolator CLOSE = new PathInterpolator(.35f, 0f, .85f, .52f);
     private static final int HUB_RADIUS_DP = 44;
+    private static final int OPEN_DURATION_MS = 290;
 
     private final String[] labels;
     private final View[] buttons;
@@ -43,13 +47,15 @@ final class RadialMenu extends FrameLayout {
     private final TextView hub, batteryStatus;
     private final LaserPointer laser;
     private final Runnable close;
-    private final boolean penOnly, preview, requireHover;
+    private final boolean penOnly, preview, requireHover, useSeparateSurface;
     private final float maxScale;
     private final Appearance.Palette colors;
     private final Runnable fallback = this::revealAtCenter;
     private boolean waitingForHover;
     private boolean revealed;
     private boolean opening;
+    private SurfaceRingAnimation surfaceAnimation;
+    private Runnable surfaceTimeout;
     private boolean hoverPending;
     private float hoverX, hoverY;
     private boolean closing;
@@ -83,6 +89,9 @@ final class RadialMenu extends FrameLayout {
             boolean preview) {
         super(context);
         this.preview = preview;
+        // Huawei can slow the overlay's UI frame cadence when no PenDock Accessibility service is bound.
+        useSeparateSurface = !preview && "huawei".equalsIgnoreCase(Build.MANUFACTURER)
+                && !WindowModeMonitor.isReady() && !SystemScreenshot.isReady() && !CircleCaptureService.isReady();
         maxScale = preview ? 1.3f : 1f;
         colors = Ui.colors(context);
         this.fallbackX = fallbackX;
@@ -410,6 +419,13 @@ final class RadialMenu extends FrameLayout {
         place(x, y);
         revealed = true;
         boolean animate = !preview && ValueAnimator.areAnimatorsEnabled();
+        if (animate && startSurfaceAnimation(true, OPEN, OPEN_DURATION_MS, () -> {
+            ring.setVisibility(VISIBLE);
+            completeOpening();
+        })) {
+            opening = true;
+            return;
+        }
         if (animate) {
             opening = true;
             ring.setScaleX(.48f);
@@ -420,15 +436,61 @@ final class RadialMenu extends FrameLayout {
         ring.setVisibility(VISIBLE);
         if (animate) {
             ring.animate().scaleX(1f).scaleY(1f).rotation(0f).alpha(1f)
-                    .setDuration(290).setInterpolator(OPEN).withLayer()
-                    .withEndAction(() -> {
-                        opening = false;
-                        if (hoverPending && hasWindowFocus()) {
-                            hoverPending = false;
-                            updateHover(hoverX, hoverY);
-                        }
-                    }).start();
+                    .setDuration(OPEN_DURATION_MS).setInterpolator(OPEN).withLayer()
+                    .withEndAction(this::completeOpening).start();
         }
+    }
+
+    private void completeOpening() {
+        opening = false;
+        if (hoverPending && hasWindowFocus()) {
+            hoverPending = false;
+            updateHover(hoverX, hoverY);
+        }
+    }
+
+    private boolean startSurfaceAnimation(boolean entering, TimeInterpolator easing, long duration, Runnable next) {
+        if (!useSeparateSurface || ring.getWidth() != ringSize || ring.getHeight() != ringSize) return false;
+        Bitmap artwork = Bitmap.createBitmap(ringSize, ringSize, Bitmap.Config.ARGB_8888);
+        try {
+            ring.draw(new Canvas(artwork));
+        } catch (RuntimeException unsupported) {
+            artwork.recycle();
+            return false;
+        }
+
+        Consumer<SurfaceRingAnimation> complete = finished -> {
+            if (surfaceAnimation == finished && stopSurfaceAnimation() && isAttachedToWindow()) next.run();
+        };
+        SurfaceRingAnimation animation = new SurfaceRingAnimation(getContext(), artwork, easing, duration,
+                entering, this::handoffClosingSurface, complete);
+        LayoutParams position = new LayoutParams(ringSize, ringSize);
+        position.leftMargin = Math.round(ring.getTranslationX());
+        position.topMargin = Math.round(ring.getTranslationY());
+        surfaceAnimation = animation;
+        surfaceTimeout = () -> complete.accept(animation);
+        addView(animation, position);
+        postDelayed(surfaceTimeout, duration + 260);
+        return true;
+    }
+
+    private void handoffClosingSurface(Runnable begin) {
+        if (!closing || surfaceAnimation == null || !isAttachedToWindow()) return;
+        // Leave the live ring visible until the separate surface has submitted its first buffer.
+        ring.setVisibility(INVISIBLE);
+        if (isHardwareAccelerated()) getViewTreeObserver().registerFrameCommitCallback(begin);
+        else begin.run();
+    }
+
+    private boolean stopSurfaceAnimation() {
+        SurfaceRingAnimation animation = surfaceAnimation;
+        if (animation == null) return false;
+        removeCallbacks(surfaceTimeout);
+        surfaceAnimation = null;
+        surfaceTimeout = null;
+        animation.stop();
+        if (isAttachedToWindow()) removeView(animation);
+        return true;
     }
 
     private void place(float x, float y) {
@@ -588,6 +650,7 @@ final class RadialMenu extends FrameLayout {
     private void finish(Runnable next, long duration) {
         if (closing) return;
         closing = true;
+        if (stopSurfaceAnimation()) ring.setVisibility(VISIBLE);
         opening = false;
         hoverPending = false;
         laser.hide();
@@ -598,11 +661,18 @@ final class RadialMenu extends FrameLayout {
         ring.animate().cancel();
         if (highlightAnimation != null) highlightAnimation.cancel();
         if (batteryAnimation != null) batteryAnimation.cancel();
+        if (startSurfaceAnimation(false, CLOSE, duration, next)) return;
         ring.animate().scaleX(.48f).scaleY(.48f).rotation(-32f).alpha(0f)
                 .setDuration(duration).setInterpolator(CLOSE).withLayer().withEndAction(next).start();
     }
 
     @Override protected void onDetachedFromWindow() {
+        if (surfaceAnimation != null) {
+            removeCallbacks(surfaceTimeout);
+            surfaceAnimation.stop();
+            surfaceAnimation = null;
+            surfaceTimeout = null;
+        }
         removeCallbacks(fallback);
         removeCallbacks(close);
         ring.animate().cancel();
