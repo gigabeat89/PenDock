@@ -1,6 +1,6 @@
 <resources>
     <string name="circle_capture_name">PenDock · วงเพื่อค้นหา</string>
-    <string name="circle_capture_description">จับภาพหนึ่งเฟรมเมื่อเลือกวงเพื่อค้นหา แล้วแชร์เฉพาะส่วนที่วงไปยัง Google Lens</string>
+    <string name="circle_capture_description">จับภาพหนึ่งเฟรมเมื่อเลือกวงเพื่อค้นหา แล้วส่งเฉพาะส่วนที่วงไปยัง Google Lens, แอพ AI, แชร์, คัดลอก หรือบันทึก</string>
     <string name="screenshot_service_name">PenDock · จับภาพและล็อกหน้าจอ</string>
     <string name="screenshot_service_description">เรียกคำสั่งจับภาพหรือล็อกหน้าจอของระบบเมื่อเลือกจากวงเมนู หากเปิดการย่อแอพ บริการจะใช้ชื่อแพ็กเกจและกิจกรรมของหน้าต่างปัจจุบัน บริการนี้ไม่ได้ขอสิทธิ์อ่านเนื้อหาหน้าจอ</string>
     <string name="window_mode_name">PenDock · สถานะหน้าต่าง</string>
@@ -100,7 +100,7 @@
     <string name="screenshot_detail">เรียกคำสั่งจับภาพและล็อกของระบบ</string>
     <string name="window_title">ตรวจสถานะหน้าต่าง</string>
     <string name="window_detail">ใช้รายการแอพยกเว้นและคำสั่งหน้าต่างลอย</string>
-    <string name="circle_detail">จับภาพส่วนที่วงเพื่อส่งไปยัง Google Lens</string>
+    <string name="circle_detail">ส่งส่วนที่วงไปยัง Google Lens, แชร์, คัดลอก หรือบันทึก</string>
     <string name="app_version">v%1$s</string>
     <string name="app_description">แตะด้านข้าง M-Pencil สองครั้งเพื่อเปิดวงเมนูทางลัดบน MatePad</string>
     <string name="terms_title">ข้อกำหนดการใช้งาน</string>
@@ -161,6 +161,7 @@
     <string name="split_failed">ระบบไม่สามารถแบ่งหน้าจอแอพนี้ได้</string>
     <string name="split_pick_title">เลือกแอพวางคู่กัน</string>
     <string name="split_pinned">จากวงเมนูของคุณ</string>
+    <string name="split_recent">แอพล่าสุด</string>
     <string name="laser_tool">ตัวชี้เลเซอร์</string>
     <string name="laser_color">เปลี่ยนสีเลเซอร์</string>
     <string name="laser_overlay_failed">เปิดตัวชี้เลเซอร์บนหน้านี้ไม่ได้</string>
@@ -168,6 +169,10 @@
     <string name="window_compact">กะทัดรัด</string>
     <string name="window_standard">มาตรฐาน</string>
     <string name="window_large">ใหญ่</string>
+    <string name="circle_buttons">ปุ่มในวงเพื่อค้นหา</string>
+    <string name="circle_buttons_hint">แสดงคู่กับ Google Lens หลังวงพื้นที่</string>
+    <string name="circle_buttons_lens_only">วงเสร็จแล้วส่งเข้า Google Lens ทันที</string>
+    <string name="circle_lens_default">แสดงเสมอ</string>
     <string name="circle_action_lens">Lens</string>
     <string name="circle_action_share">แชร์</string>
     <string name="circle_action_copy">คัดลอก</string>

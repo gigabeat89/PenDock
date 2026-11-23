@@ -55,13 +55,21 @@ public class CircleFiles extends DocumentsProvider {
             if (i >= MAX_CROPS || System.currentTimeMillis() - files[i].lastModified() > RETENTION_MS) {
                 context.revokeUriPermission(DocumentsContract.buildDocumentUri(authority(context),
                         files[i].getName()), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                context.revokeUriPermission(CircleShareProvider.uriFor(context, files[i].getName()),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 files[i].delete();
             }
         }
-        Uri uri = DocumentsContract.buildDocumentUri(authority(context), image.getName());
         context.getContentResolver().notifyChange(
                 DocumentsContract.buildChildDocumentsUri(authority(context), ROOT), null);
-        return uri;
+        return CircleShareProvider.uriFor(context, image.getName());
+    }
+
+    static File resolveValid(Context context, String id) {
+        if (id == null || !id.matches("capture-[0-9]+\\.png")) return null;
+        File image = new File(directory(context), id);
+        if (!image.isFile() || System.currentTimeMillis() - image.lastModified() > RETENTION_MS) return null;
+        return image;
     }
 
     private static String authority(Context context) { return context.getPackageName() + ".circles"; }

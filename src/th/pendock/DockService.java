@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
@@ -29,9 +30,12 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 import java.io.OutputStream;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -87,6 +91,7 @@ public class DockService extends Service {
     private int circleRequest;
     private int splitRequest;
     private int menuRequest;
+    private boolean splitTransitioning;
     private final ExecutorService background = Executors.newSingleThreadExecutor();
     private Shortcuts shortcuts;
     private ExcludedApps exclusions;
@@ -110,7 +115,7 @@ public class DockService extends Service {
             if (getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
             android.util.Log.d("PenDock", "Huawei stylus double tap");
             if (circleSelection != null) cancelCircleSearch();
-            else if (splitPicker != null) cancelSplitPicker();
+            else if (splitPicker != null || splitTransitioning) return;
             else if (laserOverlay != null) cancelLaserOverlay();
             else if (menu != null) menu.dismiss();
             else showMenu(true);
@@ -129,6 +134,10 @@ public class DockService extends Service {
     private final BroadcastReceiver packagesChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             ActiveWindow.clearCache();
+            if (shortcuts != null) {
+                shortcuts.invalidateCache();
+                if (!background.isShutdown()) background.execute(shortcuts::warmUp);
+            }
             refreshShortcuts();
         }
     };
@@ -154,6 +163,7 @@ public class DockService extends Service {
             shortcuts.preferences().registerOnSharedPreferenceChangeListener(shortcutsChanged);
             Appearance.preferences(this).registerOnSharedPreferenceChangeListener(appearanceChanged);
             refreshShortcuts();
+            background.execute(shortcuts::warmUp);
             setRunning(true);
             IntentFilter filter = new IntentFilter(DOUBLE_TAP);
             if (Build.VERSION.SDK_INT >= 33) {
@@ -183,7 +193,11 @@ public class DockService extends Service {
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         menuContext = Appearance.localize(this);
-        if (shortcuts != null) refreshShortcuts();
+        if (shortcuts != null) {
+            shortcuts.invalidateCache();
+            if (!background.isShutdown()) background.execute(shortcuts::warmUp);
+            refreshShortcuts();
+        }
         cancelCircleSearch();
         cancelSplitPicker();
         cancelLaserOverlay();
@@ -246,10 +260,9 @@ public class DockService extends Service {
                 entries, app -> openShortcut(app, focused), "—",
                 activeTarget == null || alreadyWindowed ? null : () -> floatActive(activeTarget, focused),
                 alreadyWindowed,
-                activeTarget == null || alreadySplit ? null : () -> splitActive(activeTarget, focused),
+                activeTarget == null || alreadySplit || alreadyWindowed ? null : () -> splitActive(activeTarget, focused),
                 alreadySplit, blurFrame);
-        int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+        int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
         int blurDp = RingConfig.ringBlurDp(this);
         boolean nativeBlur = blurFrame == null && blurDp > 0 && Build.VERSION.SDK_INT >= 31
                 && manager.isCrossWindowBlurEnabled();
@@ -259,6 +272,7 @@ public class DockService extends Service {
         if (nativeBlur) params.setBlurBehindRadius(Ui.dp(this, blurDp));
         params.setTitle("PenDock menu");
         params.gravity = Gravity.TOP | Gravity.LEFT;
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN;
         if (Build.VERSION.SDK_INT >= 30) {
             params.setFitInsetsTypes(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
             params.setFitInsetsIgnoringVisibility(true);
@@ -314,6 +328,13 @@ public class DockService extends Service {
                     Toast.LENGTH_LONG).show();
             return;
         }
+        boolean hasExtra = RingConfig.isCircleShareShown(this)
+                || RingConfig.isCircleCopyShown(this)
+                || RingConfig.isCircleSaveShown(this);
+        if (!hasExtra && !LensShare.isAvailable(this)) {
+            showLensUnavailable();
+            return;
+        }
         int request = ++circleRequest;
         main.postDelayed(() -> {
             if (request != circleRequest || menu != null) return;
@@ -331,7 +352,11 @@ public class DockService extends Service {
             return;
         }
         CircleSelection selection = new CircleSelection(Appearance.localize(this), frame,
-                LensShare.isAvailable(this), this::cancelCircleSearch, this::handleCircleAction);
+                LensShare.isAvailable(this),
+                RingConfig.isCircleShareShown(this),
+                RingConfig.isCircleCopyShown(this),
+                RingConfig.isCircleSaveShown(this),
+                this::cancelCircleSearch, this::handleCircleAction);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_SECURE,
@@ -357,11 +382,6 @@ public class DockService extends Service {
             saveCircleToGallery(crop);
             return;
         }
-        if (action == CircleSelection.Action.LENS && !LensShare.isAvailable(this)) {
-            crop.recycle();
-            showLensUnavailable();
-            return;
-        }
         int request = circleRequest;
         background.execute(() -> {
             try {
@@ -373,7 +393,7 @@ public class DockService extends Service {
                         try {
                             LensShare.send(this, uri);
                         } catch (ActivityNotFoundException | SecurityException unavailable) {
-                            android.util.Log.w("PenDock", "Could not send the circled image to Lens", unavailable);
+                            android.util.Log.w("PenDock", "Could not open Google Lens for circled image", unavailable);
                             showLensUnavailable();
                         }
                     } else if (action == CircleSelection.Action.SHARE) {
@@ -405,6 +425,10 @@ public class DockService extends Service {
                 crop.recycle();
             }
         });
+    }
+
+    private void showLensUnavailable() {
+        Toast.makeText(this, Appearance.text(this, R.string.lens_missing), Toast.LENGTH_LONG).show();
     }
 
     private void saveCircleToGallery(Bitmap crop) {
@@ -441,11 +465,6 @@ public class DockService extends Service {
                     Appearance.text(this, saved ? R.string.saved_album : R.string.save_failed),
                     Toast.LENGTH_SHORT).show());
         });
-    }
-
-    private void showLensUnavailable() {
-        Toast.makeText(this, Appearance.text(this, R.string.lens_missing),
-                Toast.LENGTH_LONG).show();
     }
 
     private void cancelCircleSearch() {
@@ -502,6 +521,7 @@ public class DockService extends Service {
             return;
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        WindowModeMonitor.recordRecent(this, packageName);
         launch(intent, floating ? floatingOptions() : null);
     }
 
@@ -515,6 +535,7 @@ public class DockService extends Service {
         secondaryIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
         String currentPkg = focused != null && focused.activity != null ? focused.activity.getPackageName() : null;
         if (focused != null && focused.alreadySplit) {
+            WindowModeMonitor.recordRecent(this, app.id);
             launch(secondaryIntent, splitOptions(true));
             return;
         }
@@ -529,6 +550,7 @@ public class DockService extends Service {
                     startActivity(primaryIntent, splitOptions(false));
                     main.postDelayed(() -> {
                         if (request != splitRequest || !running || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+                        WindowModeMonitor.recordRecent(this, app.id);
                         launch(secondaryIntent, splitOptions(true));
                     }, 150);
                 } catch (RuntimeException failure) {
@@ -544,8 +566,9 @@ public class DockService extends Service {
         Intent primary = getPackageManager().getLaunchIntentForPackage(app.id);
         if (primary != null) {
             primary.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            WindowModeMonitor.recordRecent(this, app.id);
             launch(primary, splitOptions(false));
-            main.postDelayed(() -> showSplitPicker(request, app.id), 180);
+            main.postDelayed(() -> showSplitPicker(request, app.id, new Intent(primary), primary.getComponent(), true), 180);
         } else {
             detach();
         }
@@ -556,15 +579,38 @@ public class DockService extends Service {
             detach();
             return;
         }
-        Bundle options = splitOptions(false);
         String primaryPackage = selection.activity == null ? null : selection.activity.getPackageName();
+        Intent primaryCopy = new Intent(requested);
+        ComponentName primaryActivity = selection.activity;
         int request = ++splitRequest;
         detach();
-        if (!SystemScreenshot.switchToHome(selection.activity, () -> {
+        if (Build.VERSION.SDK_INT >= 30 && CircleCaptureService.isReady() && Settings.canDrawOverlays(this)) {
+            main.postDelayed(() -> {
+                if (request != splitRequest || !running || menu != null
+                        || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+                CircleCaptureService.capture(frame -> {
+                    if (frame == null || request != splitRequest || !running || menu != null
+                            || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                        if (frame != null) frame.recycle();
+                        runSplitLaunch(request, requested, primaryPackage, primaryCopy, primaryActivity);
+                        return;
+                    }
+                    runSplitEnterTransition(request, frame, requested, primaryPackage, primaryCopy, primaryActivity);
+                });
+            }, 32);
+            return;
+        }
+        runSplitLaunch(request, requested, primaryPackage, primaryCopy, primaryActivity);
+    }
+
+    private void runSplitLaunch(int request, Intent requested, String primaryPackage,
+            Intent primaryCopy, ComponentName primaryActivity) {
+        Bundle options = splitOptions(false, false);
+        if (!SystemScreenshot.switchToHome(primaryActivity, () -> {
             if (request != splitRequest || !running || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
             try {
                 startActivity(requested, options);
-                main.postDelayed(() -> showSplitPicker(request, primaryPackage), 180);
+                main.postDelayed(() -> showSplitPicker(request, primaryPackage, primaryCopy, primaryActivity, true), 180);
             } catch (RuntimeException failure) {
                 android.util.Log.w("PenDock", "Split windowingMode launch failed", failure);
                 if (!SystemScreenshot.toggleSplitScreen()) {
@@ -578,16 +624,157 @@ public class DockService extends Service {
         }
     }
 
-    private void showSplitPicker(int request, String primaryPackage) {
+    private void runSplitEnterTransition(int request, Bitmap frame, Intent requested,
+            String primaryPackage, Intent primaryCopy, ComponentName primaryActivity) {
+        Rect bounds = displayBounds();
+        boolean landscape = bounds.width() >= bounds.height();
+        int screenW = bounds.width();
+        int screenH = bounds.height();
+
+        FrameLayout curtain = new FrameLayout(this);
+        android.widget.ImageView appView = new android.widget.ImageView(this);
+        appView.setImageBitmap(frame);
+        appView.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+        appView.setPivotX(0f);
+        appView.setPivotY(0f);
+        curtain.addView(appView, new FrameLayout.LayoutParams(screenW, screenH, Gravity.TOP | Gravity.LEFT));
+
+        WindowManager.LayoutParams curtainParams = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        curtainParams.setTitle("PenDock split enter");
+        curtainParams.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= 30) {
+            curtainParams.setFitInsetsTypes(0);
+            curtainParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        boolean[] cleaned = {false};
+        splitTransitioning = true;
+        Runnable cleanup = () -> {
+            if (cleaned[0]) return;
+            cleaned[0] = true;
+            splitTransitioning = false;
+            appView.setImageDrawable(null);
+            removeOverlay(curtain);
+            frame.recycle();
+        };
+        try {
+            manager.addView(curtain, curtainParams);
+        } catch (RuntimeException unavailable) {
+            cleanup.run();
+            runSplitLaunch(request, requested, primaryPackage, primaryCopy, primaryActivity);
+            return;
+        }
+        main.postDelayed(cleanup, 1600);
+
+        // Wait until the curtain surface is committed before switching to Home and launching split mode.
+        curtain.postOnAnimation(() -> curtain.postOnAnimation(() -> {
+            if (cleaned[0] || request != splitRequest || !running
+                    || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                cleanup.run();
+                return;
+            }
+            Intent noAnim = new Intent(requested).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            Bundle options = splitOptions(false, true);
+            if (!SystemScreenshot.switchToHome(primaryActivity, () -> {
+                if (cleaned[0] || request != splitRequest || !running
+                        || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                    cleanup.run();
+                    return;
+                }
+                try {
+                    startActivity(noAnim, options);
+                } catch (RuntimeException failure) {
+                    android.util.Log.w("PenDock", "Split windowingMode launch failed", failure);
+                    cleanup.run();
+                    if (!SystemScreenshot.toggleSplitScreen()) {
+                        Toast.makeText(this, Appearance.text(this, R.string.split_failed), Toast.LENGTH_SHORT).show();
+                    }
+                    return;
+                }
+                main.postDelayed(() -> {
+                    if (cleaned[0] || request != splitRequest || !running
+                            || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                        cleanup.run();
+                        return;
+                    }
+                    showSplitPicker(request, primaryPackage, primaryCopy, primaryActivity, true);
+                    android.view.animation.PathInterpolator curve =
+                            new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f);
+                    appView.animate()
+                            .scaleX(landscape ? 0.5f : 1f)
+                            .scaleY(landscape ? 1f : 0.5f)
+                            .setDuration(260)
+                            .setInterpolator(curve)
+                            .withEndAction(() -> {
+                                if (cleaned[0]) return;
+                                appView.animate()
+                                        .alpha(0f)
+                                        .setDuration(100)
+                                        .withEndAction(cleanup)
+                                        .start();
+                            })
+                            .start();
+                }, 200);
+            })) {
+                cleanup.run();
+                if (!SystemScreenshot.toggleSplitScreen()) {
+                    Toast.makeText(this, Appearance.text(this, R.string.split_failed), Toast.LENGTH_SHORT).show();
+                }
+            }
+        }));
+    }
+
+    private void showSplitPicker(int request, String primaryPackage, Intent primaryIntent,
+            ComponentName primaryActivity, boolean animateIn) {
         if (request != splitRequest || !running || splitPicker != null || menu != null
                 || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
         if (!Settings.canDrawOverlays(this)) return;
         Rect bounds = displayBounds();
         boolean landscape = bounds.width() >= bounds.height();
-        int width = landscape ? bounds.width() / 2 : WindowManager.LayoutParams.MATCH_PARENT;
-        int height = landscape ? WindowManager.LayoutParams.MATCH_PARENT : bounds.height() / 2;
+        int seamGuard = Ui.dp(this, 20);
+        int width = landscape ? bounds.width() / 2 + seamGuard : WindowManager.LayoutParams.MATCH_PARENT;
+        int height = landscape ? WindowManager.LayoutParams.MATCH_PARENT : bounds.height() / 2 + seamGuard;
+        Set<String> excluded = new HashSet<>(WindowModeMonitor.floatingPackages());
+        if (primaryPackage != null) excluded.add(primaryPackage);
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(width, height,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        params.setTitle("PenDock split picker");
+        params.gravity = landscape ? (Gravity.TOP | Gravity.END) : (Gravity.BOTTOM | Gravity.START);
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
+        if (Build.VERSION.SDK_INT >= 30) {
+            params.setFitInsetsTypes(WindowInsets.Type.ime());
+            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        Runnable onClose = () -> {
+            SplitAppPicker closing = splitPicker;
+            int closeRequest = ++splitRequest;
+            splitPicker = null;
+            if (closing != null) {
+                params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                try {
+                    manager.updateViewLayout(closing, params);
+                } catch (RuntimeException ignored) { }
+            }
+            if (primaryIntent == null) {
+                if (closing != null) removeOverlay(closing);
+                return;
+            }
+            expandPrimaryToFullscreen(closeRequest, closing, primaryIntent, primaryActivity,
+                    bounds, landscape, width, height);
+        };
         SplitAppPicker picker = new SplitAppPicker(Appearance.localize(this), shortcuts, entries,
-                primaryPackage, background, this::cancelSplitPicker, chosen -> {
+                WindowModeMonitor.recentPackages(this), excluded, background,
+                seamGuard, landscape,
+                onClose, onClose, chosen -> {
             cancelSplitPicker();
             Intent intent = getPackageManager().getLaunchIntentForPackage(chosen.id);
             if (intent == null) {
@@ -596,26 +783,184 @@ public class DockService extends Service {
                 return;
             }
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
+            WindowModeMonitor.recordRecent(this, chosen.id);
             launch(intent, splitOptions(true));
         });
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(width, height,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT);
-        params.setTitle("PenDock split picker");
-        params.gravity = landscape ? (Gravity.TOP | Gravity.END) : (Gravity.BOTTOM | Gravity.START);
-        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
-        if (Build.VERSION.SDK_INT >= 30) {
-            params.setFitInsetsTypes(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-            params.setFitInsetsIgnoringVisibility(true);
+        if (animateIn) {
+            picker.setTranslationX(landscape ? (bounds.width() / 2f) : 0f);
+            picker.setTranslationY(landscape ? 0f : (bounds.height() / 2f));
         }
         try {
             manager.addView(picker, params);
             splitPicker = picker;
             picker.requestFocus();
+            if (animateIn) {
+                picker.animate()
+                        .translationX(0f)
+                        .translationY(0f)
+                        .setDuration(260)
+                        .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f))
+                        .start();
+            }
         } catch (WindowManager.BadTokenException | SecurityException unavailable) {
             android.util.Log.w("PenDock", "Could not show split app picker", unavailable);
+        }
+    }
+
+    private void expandPrimaryToFullscreen(int request, SplitAppPicker closing, Intent requested,
+            ComponentName primaryActivity, Rect bounds, boolean landscape, int pickerWidth, int pickerHeight) {
+        if (Build.VERSION.SDK_INT >= 30 && CircleCaptureService.isReady() && Settings.canDrawOverlays(this)) {
+            CircleCaptureService.capture(frame -> {
+                if (frame == null || !running || request != splitRequest
+                        || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                    if (frame != null) frame.recycle();
+                    slideOutAndRestore(closing, requested, primaryActivity, landscape, pickerWidth, pickerHeight);
+                    return;
+                }
+                runSplitExpandTransition(closing, frame, requested, primaryActivity, bounds, landscape);
+            });
+            return;
+        }
+        slideOutAndRestore(closing, requested, primaryActivity, landscape, pickerWidth, pickerHeight);
+    }
+
+    private void slideOutAndRestore(SplitAppPicker closing, Intent requested, ComponentName primaryActivity,
+            boolean landscape, int pickerWidth, int pickerHeight) {
+        if (closing != null) {
+            closing.animate()
+                    .translationX(landscape ? pickerWidth : 0)
+                    .translationY(landscape ? 0 : pickerHeight)
+                    .alpha(0f)
+                    .setDuration(240)
+                    .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f))
+                    .withEndAction(() -> removeOverlay(closing))
+                    .start();
+        }
+        restoreFullscreenFromSplit(requested, primaryActivity, null);
+    }
+
+    private void runSplitExpandTransition(SplitAppPicker closing, Bitmap frame, Intent requested,
+            ComponentName primaryActivity, Rect bounds, boolean landscape) {
+        int fw = frame.getWidth();
+        int fh = frame.getHeight();
+        int halfW = Math.max(1, fw / 2);
+        int halfH = Math.max(1, fh / 2);
+        Bitmap primaryBmp;
+        Bitmap pickerBmp;
+        try {
+            if (landscape) {
+                primaryBmp = Bitmap.createBitmap(frame, 0, 0, halfW, fh);
+                pickerBmp = Bitmap.createBitmap(frame, halfW, 0, fw - halfW, fh);
+            } else {
+                primaryBmp = Bitmap.createBitmap(frame, 0, 0, fw, halfH);
+                pickerBmp = Bitmap.createBitmap(frame, 0, halfH, fw, fh - halfH);
+            }
+        } catch (RuntimeException failure) {
+            frame.recycle();
+            if (closing != null) removeOverlay(closing);
+            restoreFullscreenFromSplit(requested, primaryActivity, null);
+            return;
+        }
+        frame.recycle();
+
+        FrameLayout curtain = new FrameLayout(this);
+        android.widget.ImageView primaryView = new android.widget.ImageView(this);
+        primaryView.setImageBitmap(primaryBmp);
+        primaryView.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+        android.widget.ImageView pickerView = new android.widget.ImageView(this);
+        pickerView.setImageBitmap(pickerBmp);
+        pickerView.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+
+        int screenW = bounds.width();
+        int screenH = bounds.height();
+        int splitW = screenW / 2;
+        int splitH = screenH / 2;
+        if (landscape) {
+            curtain.addView(primaryView, new FrameLayout.LayoutParams(splitW, screenH, Gravity.TOP | Gravity.LEFT));
+            FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(
+                    screenW - splitW, screenH, Gravity.TOP | Gravity.LEFT);
+            rightParams.leftMargin = splitW;
+            curtain.addView(pickerView, rightParams);
+        } else {
+            curtain.addView(primaryView, new FrameLayout.LayoutParams(screenW, splitH, Gravity.TOP | Gravity.LEFT));
+            FrameLayout.LayoutParams bottomParams = new FrameLayout.LayoutParams(
+                    screenW, screenH - splitH, Gravity.TOP | Gravity.LEFT);
+            bottomParams.topMargin = splitH;
+            curtain.addView(pickerView, bottomParams);
+        }
+
+        WindowManager.LayoutParams curtainParams = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        curtainParams.setTitle("PenDock split transition");
+        curtainParams.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= 30) {
+            curtainParams.setFitInsetsTypes(0);
+            curtainParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        boolean[] cleaned = {false};
+        splitTransitioning = true;
+        Runnable cleanup = () -> {
+            if (cleaned[0]) return;
+            cleaned[0] = true;
+            splitTransitioning = false;
+            primaryView.setImageDrawable(null);
+            pickerView.setImageDrawable(null);
+            removeOverlay(curtain);
+            primaryBmp.recycle();
+            pickerBmp.recycle();
+        };
+        try {
+            manager.addView(curtain, curtainParams);
+        } catch (RuntimeException unavailable) {
+            cleanup.run();
+            if (closing != null) removeOverlay(closing);
+            restoreFullscreenFromSplit(requested, primaryActivity, null);
+            return;
+        }
+
+        // Safety cleanup in case animation callbacks do not fire.
+        main.postDelayed(cleanup, 1400);
+
+        // Wait until the curtain surface is committed before removing the picker and switching tasks.
+        curtain.postOnAnimation(() -> curtain.postOnAnimation(() -> {
+            if (cleaned[0]) return;
+            if (closing != null) removeOverlay(closing);
+            restoreFullscreenFromSplit(requested, primaryActivity, () -> main.postDelayed(() -> {
+                if (cleaned[0]) return;
+                android.view.animation.PathInterpolator curve =
+                        new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f);
+                primaryView.animate()
+                        .alpha(0f)
+                        .setDuration(140)
+                        .start();
+                pickerView.animate()
+                        .translationX(landscape ? (screenW - splitW) : 0)
+                        .translationY(landscape ? 0 : (screenH - splitH))
+                        .setDuration(260)
+                        .setInterpolator(curve)
+                        .withEndAction(cleanup)
+                        .start();
+            }, 220));
+        }));
+    }
+
+    private void restoreFullscreenFromSplit(Intent requested, ComponentName primaryActivity,
+            Runnable onLaunched) {
+        Intent copy = new Intent(requested).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        Bundle options = ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle();
+        options.putInt("android.activity.windowingMode", 1);
+        Runnable launchFullscreen = () -> {
+            if (running && !getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                launch(copy, options, false);
+            }
+            if (onLaunched != null) onLaunched.run();
+        };
+        if (!SystemScreenshot.switchToHome(primaryActivity, launchFullscreen)) {
+            launchFullscreen.run();
         }
     }
 
@@ -658,7 +1003,13 @@ public class DockService extends Service {
     }
 
     private Bundle splitOptions(boolean secondary) {
-        Bundle options = ActivityOptions.makeBasic().toBundle();
+        return splitOptions(secondary, false);
+    }
+
+    private Bundle splitOptions(boolean secondary, boolean noAnim) {
+        Bundle options = noAnim
+                ? ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle()
+                : ActivityOptions.makeBasic().toBundle();
         boolean huawei = "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER);
         options.putInt("android.activity.windowingMode", huawei ? (secondary ? 101 : 100) : (secondary ? 4 : 3));
         return options;

@@ -3,6 +3,8 @@ package th.pendock;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.ComponentName;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.graphics.Insets;
@@ -14,10 +16,19 @@ import android.view.WindowManager;
 import android.view.WindowMetrics;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityWindowInfo;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 /** Associates activity announcements with window geometry without retrieving UI nodes. */
 public class WindowModeMonitor extends AccessibilityService {
+    private static final String RECENT_PREFS = "recent_apps";
+    private static final String RECENT_KEY = "packages";
+    private static final int MAX_RECENT = 12;
+    private static final LinkedList<String> recent = new LinkedList<>();
+    private static boolean recentLoaded;
     private static WindowModeMonitor connected;
 
     private final LruCache<Integer, App> activities = new LruCache<>(32);
@@ -25,12 +36,78 @@ public class WindowModeMonitor extends AccessibilityService {
 
     static boolean isReady() { return connected != null; }
 
+    static void recordRecent(Context context, String packageName) {
+        if (packageName == null || !ActiveWindow.isAppWindow(context, packageName)) return;
+        if (context.getPackageManager().getLaunchIntentForPackage(packageName) == null) return;
+        synchronized (recent) {
+            ensureRecentLoaded(context);
+            if (!recent.isEmpty() && packageName.equals(recent.getFirst())) return;
+            recent.remove(packageName);
+            recent.addFirst(packageName);
+            while (recent.size() > MAX_RECENT) recent.removeLast();
+            saveRecent(context);
+        }
+    }
+
+    static List<String> recentPackages(Context context) {
+        synchronized (recent) {
+            ensureRecentLoaded(context);
+            return new ArrayList<>(recent);
+        }
+    }
+
+    private static void ensureRecentLoaded(Context context) {
+        if (recentLoaded) return;
+        recentLoaded = true;
+        SharedPreferences prefs = context.getSharedPreferences(RECENT_PREFS, Context.MODE_PRIVATE);
+        String saved = prefs.getString(RECENT_KEY, "");
+        if (saved == null || saved.isEmpty()) return;
+        for (String pkg : saved.split("\\|")) {
+            if (!pkg.isEmpty() && !recent.contains(pkg) && recent.size() < MAX_RECENT) {
+                recent.addLast(pkg);
+            }
+        }
+    }
+
+    private static void saveRecent(Context context) {
+        context.getSharedPreferences(RECENT_PREFS, Context.MODE_PRIVATE).edit()
+                .putString(RECENT_KEY, String.join("|", recent)).apply();
+    }
+
     static void refreshTracking() {
         if (connected != null) connected.configure();
     }
 
     static FocusedApp focusedApp() {
         return connected == null || !connected.tracking ? null : connected.readFocusedApp();
+    }
+
+    static Set<String> floatingPackages() {
+        return connected == null || !connected.tracking ? new HashSet<>() : connected.readFloatingPackages();
+    }
+
+    private Set<String> readFloatingPackages() {
+        Set<String> result = new HashSet<>();
+        List<AccessibilityWindowInfo> windows = getWindows();
+        try {
+            Rect display = usableDisplay();
+            for (AccessibilityWindowInfo window : windows) {
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION
+                        || window.isInPictureInPictureMode()) continue;
+                Rect bounds = new Rect();
+                window.getBoundsInScreen(bounds);
+                if (bounds.isEmpty()) continue;
+                boolean spansWidth = spansAxis(bounds.left, bounds.right, display.left, display.right);
+                boolean spansHeight = spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
+                if (!spansWidth && !spansHeight) {
+                    App app = activities.get(window.getId());
+                    if (app != null && app.activity != null) result.add(app.activity.getPackageName());
+                }
+            }
+            return result;
+        } finally {
+            for (AccessibilityWindowInfo window : windows) window.recycle();
+        }
     }
 
     private void configure() {
@@ -170,6 +247,7 @@ public class WindowModeMonitor extends AccessibilityService {
         try {
             getPackageManager().getActivityInfo(next, 0);
             activities.put(id, new App(next, ActiveWindow.floatingLauncher(this, next)));
+            recordRecent(this, pkg);
         } catch (PackageManager.NameNotFoundException ignored) {
             // A caption, menu or dialog can announce itself for the same window.
         }

@@ -1,6 +1,6 @@
 <resources>
     <string name="circle_capture_name">PenDock · Circle to Search</string>
-    <string name="circle_capture_description">Captures one frame when you start Circle to Search and shares only the area you circle with Google Lens.</string>
+    <string name="circle_capture_description">Captures one frame when you start Circle to Search and lets you send the circled area to Google Lens, AI apps, share, copy, or save.</string>
     <string name="screenshot_service_name">PenDock · Screenshot and screen lock</string>
     <string name="screenshot_service_description">Takes screenshots or locks the screen when selected from the ring. When floating windows are enabled, it uses the current window package and activity names. It does not read on-screen content.</string>
     <string name="window_mode_name">PenDock · Window status</string>
@@ -101,7 +101,7 @@
     <string name="screenshot_detail">Use the system screenshot and lock actions</string>
     <string name="window_title">Window status</string>
     <string name="window_detail">Support app exclusions and floating windows</string>
-    <string name="circle_detail">Capture the area you circle for Google Lens</string>
+    <string name="circle_detail">Send a circled area to Google Lens, share, copy, or save</string>
     <string name="app_version">v%1$s</string>
     <string name="app_description">Double-tap the side of M-Pencil to open a ring of shortcuts on MatePad.</string>
     <string name="terms_title">Terms of Service</string>
@@ -162,6 +162,7 @@
     <string name="split_failed">Couldn\'t open this app in split screen.</string>
     <string name="split_pick_title">Choose second app</string>
     <string name="split_pinned">From your ring</string>
+    <string name="split_recent">Recent apps</string>
     <string name="laser_tool">Laser pointer</string>
     <string name="laser_color">Switch laser color</string>
     <string name="laser_overlay_failed">Couldn\'t open the laser pointer on this screen.</string>
@@ -169,6 +170,10 @@
     <string name="window_compact">Compact</string>
     <string name="window_standard">Standard</string>
     <string name="window_large">Large</string>
+    <string name="circle_buttons">Circle to Search actions</string>
+    <string name="circle_buttons_hint">Shown alongside Google Lens after circling</string>
+    <string name="circle_buttons_lens_only">Opens Google Lens immediately after circling</string>
+    <string name="circle_lens_default">Always</string>
     <string name="circle_action_lens">Lens</string>
     <string name="circle_action_share">Share</string>
     <string name="circle_action_copy">Copy</string>

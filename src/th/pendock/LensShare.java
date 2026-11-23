@@ -20,10 +20,11 @@ final class LensShare {
     }
 
     static void send(Context context, Uri crop) {
-        Intent share = intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        share.putExtra(Intent.EXTRA_STREAM, crop);
-        share.setClipData(ClipData.newRawUri("PenDock", crop));
-        // Permission must survive the Lens entry activity forwarding the image.
+        Intent share = intent()
+                .putExtra(Intent.EXTRA_STREAM, crop)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        share.setClipData(new ClipData("PenDock", new String[] {"image/png"}, new ClipData.Item(crop)));
+        // Permission must survive Lens's entry activity forwarding the image internally.
         context.grantUriPermission(GOOGLE, crop, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
             context.startActivity(share);
@@ -38,9 +39,11 @@ final class LensShare {
                 .setType("image/png")
                 .putExtra(Intent.EXTRA_STREAM, crop)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        send.setClipData(ClipData.newRawUri("PenDock", crop));
+        ClipData clip = new ClipData("PenDock", new String[] {"image/png"}, new ClipData.Item(crop));
+        send.setClipData(clip);
         Intent chooser = Intent.createChooser(send, title)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        chooser.setClipData(clip);
         context.startActivity(chooser);
     }
 

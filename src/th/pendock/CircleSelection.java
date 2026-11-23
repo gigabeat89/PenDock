@@ -1,6 +1,7 @@
 package th.pendock;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -12,20 +13,25 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import java.util.function.BiConsumer;
 
 final class CircleSelection extends FrameLayout {
     enum Action { LENS, SHARE, COPY, SAVE }
+
+    interface Listener {
+        void onAction(Action action, Bitmap crop);
+    }
 
     private final Bitmap screenshot;
     private final Path outline = new Path();
     private final RectF bounds = new RectF();
     private final RectF screen = new RectF();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final boolean instantLens;
     private final Runnable cancel;
-    private final BiConsumer<Action, Bitmap> onAction;
+    private final Listener onAction;
     private final View canvas;
     private final TextView prompt;
     private final LinearLayout actionBar;
@@ -34,9 +40,11 @@ final class CircleSelection extends FrameLayout {
     private Bitmap pendingCrop;
 
     CircleSelection(Context context, Bitmap screenshot, boolean lensAvailable,
-            Runnable cancel, BiConsumer<Action, Bitmap> onAction) {
+            boolean showShare, boolean showCopy, boolean showSave,
+            Runnable cancel, Listener onAction) {
         super(context);
         this.screenshot = screenshot;
+        this.instantLens = !showShare && !showCopy && !showSave;
         Appearance.Palette colors = Ui.colors(context);
         this.cancel = cancel;
         this.onAction = onAction;
@@ -88,19 +96,39 @@ final class CircleSelection extends FrameLayout {
         actionBar.setPadding(padding, padding, padding, padding);
         actionBar.setBackground(Ui.border(context, colors.background, 20, colors.border));
         actionBar.setVisibility(GONE);
-        if (lensAvailable) {
-            addActionButton(context, R.string.circle_action_lens, true, Action.LENS);
+        if (!instantLens) {
+            if (lensAvailable) addActionButton(context, colors, R.drawable.ic_lens, R.string.circle_action_lens, Action.LENS);
+            if (showShare) addActionButton(context, colors, R.drawable.ic_share, R.string.circle_action_share, Action.SHARE);
+            if (showCopy) addActionButton(context, colors, R.drawable.ic_copy, R.string.circle_action_copy, Action.COPY);
+            if (showSave) addActionButton(context, colors, R.drawable.ic_save, R.string.circle_action_save, Action.SAVE);
         }
-        addActionButton(context, R.string.circle_action_share, !lensAvailable, Action.SHARE);
-        addActionButton(context, R.string.circle_action_copy, false, Action.COPY);
-        addActionButton(context, R.string.circle_action_save, false, Action.SAVE);
         LayoutParams bottom = new LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         bottom.bottomMargin = Ui.dp(context, 42);
         addView(actionBar, bottom);
     }
 
-    private void addActionButton(Context context, int label, boolean primary, Action action) {
-        TextView button = Ui.action(context, context.getString(label), primary, () -> chooseAction(action));
+    private void addActionButton(Context context, Appearance.Palette colors,
+            int iconRes, int label, Action action) {
+        boolean primary = actionBar.getChildCount() == 0;
+        int tint = primary ? colors.accent : colors.text;
+        LinearLayout button = new LinearLayout(context);
+        button.setGravity(Gravity.CENTER_VERTICAL);
+        button.setMinimumHeight(Ui.dp(context, 48));
+        button.setPadding(Ui.dp(context, 14), Ui.dp(context, 8), Ui.dp(context, 16), Ui.dp(context, 8));
+        button.setBackground(Ui.pressable(context,
+                primary ? colors.accentWash : colors.surface, 12,
+                primary ? colors.accent : colors.border));
+        button.setFocusable(true);
+        button.setOnClickListener(view -> chooseAction(action));
+
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(iconRes);
+        icon.setImageTintList(ColorStateList.valueOf(tint));
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(Ui.dp(context, 19), Ui.dp(context, 19));
+        iconParams.setMarginEnd(Ui.dp(context, 7));
+        button.addView(icon, iconParams);
+        button.addView(Ui.text(context, context.getString(label), 14, tint, true));
+
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
         if (actionBar.getChildCount() > 0) params.setMarginStart(Ui.dp(context, 8));
         actionBar.addView(button, params);
@@ -109,7 +137,7 @@ final class CircleSelection extends FrameLayout {
     private void chooseAction(Action action) {
         Bitmap crop = pendingCrop;
         pendingCrop = null;
-        if (crop != null) onAction.accept(action, crop);
+        if (crop != null) onAction.onAction(action, crop);
     }
 
     private boolean trace(MotionEvent event) {
@@ -146,12 +174,16 @@ final class CircleSelection extends FrameLayout {
             pointerId = -1;
             Bitmap crop = crop();
             if (crop != null) {
-                clearPendingCrop();
-                pendingCrop = crop;
-                hasSelection = true;
-                prompt.setText(R.string.circle_ready_prompt);
-                actionBar.setVisibility(VISIBLE);
-                canvas.invalidate();
+                if (instantLens) {
+                    onAction.onAction(Action.LENS, crop);
+                } else {
+                    clearPendingCrop();
+                    pendingCrop = crop;
+                    hasSelection = true;
+                    prompt.setText(R.string.circle_ready_prompt);
+                    actionBar.setVisibility(VISIBLE);
+                    canvas.invalidate();
+                }
             } else {
                 reset();
             }

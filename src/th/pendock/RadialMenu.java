@@ -441,6 +441,13 @@ final class RadialMenu extends FrameLayout {
         int sector = sectorAt(event.getX(pointer), event.getY(pointer));
         switch (action) {
             case MotionEvent.ACTION_DOWN:
+                pressedPointer = pointerId;
+                hoverPending = false;
+                showBattery(false, false);
+                waitingForHover = false;
+                pressed = sector;
+                highlight(sector);
+                return true;
             case MotionEvent.ACTION_POINTER_DOWN:
                 if (pressedPointer != -1) return true;
                 pressedPointer = pointerId;
@@ -460,6 +467,7 @@ final class RadialMenu extends FrameLayout {
                 if (sector >= 0 && sector == pressed) choose(sector);
                 else if (sector < 0 && pressed < 0) performClick();
                 else highlight(-1);
+                pressed = -1;
                 return true;
             default:
                 return true;
@@ -762,20 +770,27 @@ final class RadialMenu extends FrameLayout {
         if (stopSurfaceAnimation()) ring.setVisibility(VISIBLE);
         opening = false;
         hoverPending = false;
+        boolean[] completed = {false};
+        Runnable done = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            next.run();
+        };
         if (!revealed || !ValueAnimator.areAnimatorsEnabled()) {
             if (dimAnimation != null) dimAnimation.cancel();
             dimProgress = 0f;
             applyDim();
-            next.run();
+            done.run();
             return;
         }
         animateDim(0f, duration, CLOSE);
         ring.animate().cancel();
         if (highlightAnimation != null) highlightAnimation.cancel();
         if (batteryAnimation != null) batteryAnimation.cancel();
-        if (startSurfaceAnimation(false, CLOSE, duration, next)) return;
+        postDelayed(done, duration + 260);
+        if (startSurfaceAnimation(false, CLOSE, duration, done)) return;
         ring.animate().scaleX(.48f).scaleY(.48f).rotation(-32f).alpha(0f)
-                .setDuration(duration).setInterpolator(CLOSE).withLayer().withEndAction(next).start();
+                .setDuration(duration).setInterpolator(CLOSE).withLayer().withEndAction(done).start();
     }
 
     @Override protected void onDetachedFromWindow() {

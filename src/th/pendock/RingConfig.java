@@ -22,6 +22,9 @@ final class RingConfig {
     private static final String LAUNCH_MODE = "launch_mode";
     private static final String WINDOW_SIZE = "floating_window_size";
     private static final String AUTO_START = "auto_start_boot";
+    private static final String CIRCLE_SHARE = "circle_show_share";
+    private static final String CIRCLE_COPY = "circle_show_copy";
+    private static final String CIRCLE_SAVE = "circle_show_save";
     static final int MAX_DIM_PERCENT = 70;
     static final int MAX_BLUR_DP = 24;
 
@@ -120,5 +123,29 @@ final class RingConfig {
 
     static void setAutoStart(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(AUTO_START, enabled).apply();
+    }
+
+    static boolean isCircleShareShown(Context context) {
+        return prefs(context).getBoolean(CIRCLE_SHARE, true);
+    }
+
+    static void setCircleShareShown(Context context, boolean shown) {
+        prefs(context).edit().putBoolean(CIRCLE_SHARE, shown).apply();
+    }
+
+    static boolean isCircleCopyShown(Context context) {
+        return prefs(context).getBoolean(CIRCLE_COPY, true);
+    }
+
+    static void setCircleCopyShown(Context context, boolean shown) {
+        prefs(context).edit().putBoolean(CIRCLE_COPY, shown).apply();
+    }
+
+    static boolean isCircleSaveShown(Context context) {
+        return prefs(context).getBoolean(CIRCLE_SAVE, true);
+    }
+
+    static void setCircleSaveShown(Context context, boolean shown) {
+        prefs(context).edit().putBoolean(CIRCLE_SAVE, shown).apply();
     }
 }

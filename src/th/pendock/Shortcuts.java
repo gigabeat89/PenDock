@@ -10,8 +10,11 @@ import android.graphics.drawable.Drawable;
 import android.util.LruCache;
 import java.text.Collator;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 final class Shortcuts {
@@ -21,6 +24,8 @@ final class Shortcuts {
     private final Context context;
     private final PackageManager packages;
     private final LruCache<String, Drawable> iconCache = new LruCache<>(128);
+    private volatile List<Entry> launcherCache;
+    private volatile Map<String, Entry> launcherMap;
 
     enum Tool {
         LOCK("tool:lock", R.string.lock_screen, R.drawable.ic_lock),
@@ -90,19 +95,69 @@ final class Shortcuts {
         return availableExcept(selectedPackages);
     }
 
+    void invalidateCache() {
+        launcherCache = null;
+        launcherMap = null;
+        iconCache.evictAll();
+    }
+
+    void warmUp() {
+        List<Entry> all = allLauncherApps();
+        int preload = Math.min(all.size(), 24);
+        for (int i = 0; i < preload; i++) {
+            loadIcon(all.get(i).id);
+        }
+    }
+
+    List<Entry> cachedAvailableExcept(Set<String> excluded) {
+        List<Entry> cached = launcherCache;
+        if (cached == null) return null;
+        return filterCached(cached, excluded);
+    }
+
+    Entry cachedDescribe(String packageName) {
+        Map<String, Entry> map = launcherMap;
+        if (map == null) return null;
+        Entry base = map.get(packageName);
+        if (base == null) return null;
+        Drawable icon = iconCache.get(packageName);
+        if (icon == null) return null;
+        return new Entry(base.id, base.label, icon, null);
+    }
+
     List<Entry> availableExcept(Set<String> excluded) {
-        Set<String> seen = new HashSet<>(excluded);
+        return filterCached(allLauncherApps(), excluded);
+    }
+
+    private List<Entry> allLauncherApps() {
+        List<Entry> cached = launcherCache;
+        if (cached != null) return cached;
+        Set<String> seen = new HashSet<>();
         seen.add(context.getPackageName());
         Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        List<Entry> result = new ArrayList<>();
+        List<Entry> loaded = new ArrayList<>();
+        Map<String, Entry> byPkg = new HashMap<>();
         for (ResolveInfo entry : packages.queryIntentActivities(launcher, 0)) {
             ApplicationInfo info = entry.activityInfo.applicationInfo;
             if (!seen.add(info.packageName)) continue;
-            result.add(new Entry(info.packageName, info.loadLabel(packages).toString(),
-                    iconCache.get(info.packageName), null));
+            Entry item = new Entry(info.packageName, info.loadLabel(packages).toString(), null, null);
+            loaded.add(item);
+            byPkg.put(info.packageName, item);
         }
         Collator order = Collator.getInstance(context.getResources().getConfiguration().getLocales().get(0));
-        result.sort((first, second) -> order.compare(first.label, second.label));
+        loaded.sort((first, second) -> order.compare(first.label, second.label));
+        List<Entry> immutable = Collections.unmodifiableList(loaded);
+        launcherMap = Collections.unmodifiableMap(byPkg);
+        launcherCache = immutable;
+        return immutable;
+    }
+
+    private List<Entry> filterCached(List<Entry> source, Set<String> excluded) {
+        List<Entry> result = new ArrayList<>(source.size());
+        for (Entry item : source) {
+            if (excluded.contains(item.id)) continue;
+            result.add(new Entry(item.id, item.label, iconCache.get(item.id), null));
+        }
         return result;
     }
 

@@ -70,7 +70,7 @@ public class SystemScreenshot extends AccessibilityService {
         if (focused != null && focused.activity != null
                 && !focused.activity.getPackageName().equals(homePackage)
                 && !focused.activity.getPackageName().equals("com.huawei.android.launcher")
-                && !focused.activity.equals(origin)) return;
+                && (origin == null || !focused.activity.getPackageName().equals(origin.getPackageName()))) return;
         action.run();
     }
 

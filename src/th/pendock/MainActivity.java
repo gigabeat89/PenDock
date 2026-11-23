@@ -1,6 +1,7 @@
 package th.pendock;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ClipData;
 import android.content.Context;
@@ -543,6 +544,14 @@ public class MainActivity extends Activity {
             Shortcuts.Entry app = selected.get(index);
             LinearLayout row = appRow(app);
             row.setPadding(0, 0, 0, 0);
+            ImageButton options = null;
+            if (Shortcuts.Tool.CIRCLE_SEARCH.id.equals(app.id)) {
+                options = Ui.iconAction(this, R.drawable.ic_settings, R.string.circle_buttons,
+                        this::showCircleOptionsDialog);
+                options.setImageTintList(ColorStateList.valueOf(colors.accent));
+                options.setBackground(Ui.pressable(this, Color.TRANSPARENT, 9, Color.TRANSPARENT));
+                row.addView(options, new LinearLayout.LayoutParams(dp(44), dp(48)));
+            }
             TextView remove = removeAction(R.string.remove, R.string.remove_named, app.label, () -> {
                 shortcuts.remove(app.id);
                 render();
@@ -590,7 +599,7 @@ public class MainActivity extends Activity {
                     }
                 });
                 row.addView(grip, new LinearLayout.LayoutParams(dp(48), dp(48)));
-                enableShortcutDrag(row, grip, remove, app, source);
+                enableShortcutDrag(row, app, source, grip, remove, options);
             }
             rows.add(row);
             addRow(list, row);
@@ -599,7 +608,101 @@ public class MainActivity extends Activity {
         return list;
     }
 
-    private void enableShortcutDrag(View row, View grip, View remove, Shortcuts.Entry app, int index) {
+    private void showCircleOptionsDialog() {
+        LinearLayout body = Ui.column(this);
+        body.setPadding(dp(20), dp(12), dp(20), dp(4));
+
+        LinearLayout list = card();
+        addRow(list, circleDefaultRow());
+
+        TextView hint = Ui.text(this, "", 12, colors.muted, false);
+        hint.setPadding(dp(4), dp(10), dp(4), 0);
+        Runnable refreshHint = () -> {
+            boolean anyOn = RingConfig.isCircleShareShown(this)
+                    || RingConfig.isCircleCopyShown(this)
+                    || RingConfig.isCircleSaveShown(this);
+            hint.setText(getString(anyOn ? R.string.circle_buttons_hint : R.string.circle_buttons_lens_only));
+        };
+
+        addRow(list, circleToggleRow(R.drawable.ic_share, R.string.circle_action_share,
+                RingConfig.isCircleShareShown(this), enabled -> {
+                    RingConfig.setCircleShareShown(this, enabled);
+                    refreshHint.run();
+                }));
+        addRow(list, circleToggleRow(R.drawable.ic_copy, R.string.circle_action_copy,
+                RingConfig.isCircleCopyShown(this), enabled -> {
+                    RingConfig.setCircleCopyShown(this, enabled);
+                    refreshHint.run();
+                }));
+        addRow(list, circleToggleRow(R.drawable.ic_save, R.string.circle_action_save,
+                RingConfig.isCircleSaveShown(this), enabled -> {
+                    RingConfig.setCircleSaveShown(this, enabled);
+                    refreshHint.run();
+                }));
+        refreshHint.run();
+
+        body.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        body.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.circle_buttons)
+                .setView(body)
+                .setPositiveButton(R.string.close, null)
+                .show();
+    }
+
+    private LinearLayout circleDefaultRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(54));
+        row.addView(circleOptionBadge(R.drawable.ic_lens, true));
+        TextView label = Ui.text(this, getString(R.string.circle_action_lens), 15, colors.text, true);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1);
+        labelParams.setMarginStart(dp(12));
+        row.addView(label, labelParams);
+        TextView badge = Ui.text(this, getString(R.string.circle_lens_default), 12, colors.accent, true);
+        badge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        badge.setBackground(Ui.shape(this, colors.accentWash, 10));
+        row.addView(badge);
+        return row;
+    }
+
+    private LinearLayout circleToggleRow(int iconRes, int labelRes, boolean initial,
+            Consumer<Boolean> onChanged) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(54));
+        FrameLayout badge = circleOptionBadge(iconRes, initial);
+        ImageView icon = (ImageView) badge.getChildAt(0);
+        row.addView(badge);
+        TextView label = Ui.text(this, getString(labelRes), 15, colors.text, true);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1);
+        labelParams.setMarginStart(dp(12));
+        row.addView(label, labelParams);
+        Switch toggle = new Switch(this);
+        toggle.setChecked(initial);
+        toggle.setContentDescription(getString(labelRes));
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            badge.setBackground(Ui.shape(this, checked ? colors.accentWash : colors.rail, 10));
+            icon.setImageTintList(ColorStateList.valueOf(checked ? colors.accent : colors.muted));
+            onChanged.accept(checked);
+        });
+        row.setOnClickListener(view -> toggle.toggle());
+        row.addView(toggle);
+        return row;
+    }
+
+    private FrameLayout circleOptionBadge(int iconRes, boolean active) {
+        FrameLayout badge = new FrameLayout(this);
+        badge.setBackground(Ui.shape(this, active ? colors.accentWash : colors.rail, 10));
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconRes);
+        icon.setImageTintList(ColorStateList.valueOf(active ? colors.accent : colors.muted));
+        badge.addView(icon, new FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER));
+        badge.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+        return badge;
+    }
+
+    private void enableShortcutDrag(View row, Shortcuts.Entry app, int index, View... handles) {
         ShortcutDrag drag = new ShortcutDrag(index);
         View.OnTouchListener trackPress = (view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -617,7 +720,10 @@ public class MainActivity extends Activity {
 
                     @Override public void onDrawShadow(Canvas canvas) { }
                 }, drag, 0);
-        for (View target : new View[] {row, grip, remove}) {
+        row.setOnTouchListener(trackPress);
+        row.setOnLongClickListener(lift);
+        for (View target : handles) {
+            if (target == null) continue;
             target.setOnTouchListener(trackPress);
             target.setOnLongClickListener(lift);
         }

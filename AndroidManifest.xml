@@ -38,6 +38,10 @@
                 <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
             </intent-filter>
         </provider>
+        <provider android:name=".CircleShareProvider"
+            android:authorities="th.pendock.share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <receiver android:name=".BatteryWidget$Resizable" android:exported="false"
             android:label="@string/widget_battery_resizable">
             <intent-filter>
