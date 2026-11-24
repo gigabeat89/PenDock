@@ -87,6 +87,9 @@ public class DockService extends Service {
     private RadialMenu menu;
     private CircleSelection circleSelection;
     private SplitAppPicker splitPicker;
+    private String splitPickerPackage;
+    private Intent splitPickerIntent;
+    private ComponentName splitPickerActivity;
     private LaserOverlay laserOverlay;
     private FloatingPulse floatingPulse;
     private final android.util.LruCache<Integer, Float> floatingScales = new android.util.LruCache<>(16);
@@ -206,9 +209,21 @@ public class DockService extends Service {
             refreshShortcuts();
         }
         cancelCircleSearch();
-        cancelSplitPicker();
         cancelLaserOverlay();
+        cancelFloatingPulse();
         detach();
+        if (splitPicker != null || splitPickerPackage != null || splitPickerIntent != null) {
+            String pkg = splitPickerPackage;
+            Intent intent = splitPickerIntent == null ? null : new Intent(splitPickerIntent);
+            ComponentName activity = splitPickerActivity;
+            if (splitPicker != null) {
+                SplitAppPicker old = splitPicker;
+                splitPicker = null;
+                removeOverlay(old);
+            }
+            int request = ++splitRequest;
+            main.postDelayed(() -> showSplitPicker(request, pkg, intent, activity, false), 260);
+        }
     }
 
     private void refreshShortcuts() {
@@ -1079,6 +1094,34 @@ public class DockService extends Service {
         }));
     }
 
+    private int splitPickerDimension(Rect bounds, boolean landscape, String primaryPackage, int seamGuard) {
+        Rect primary = WindowModeMonitor.splitPrimaryBounds(primaryPackage);
+        if (landscape) {
+            int startX = primary != null && primary.right > bounds.width() / 4 && primary.right < bounds.width() * 3 / 4
+                    ? primary.right : bounds.width() / 2;
+            int divider = primary != null ? Ui.dp(this, 8) : 0;
+            int secondaryW = Math.max(Ui.dp(this, 240), bounds.width() - startX - divider);
+            return Math.min(bounds.width(), secondaryW + seamGuard);
+        }
+        int startY;
+        if (primary != null && primary.bottom > bounds.height() / 4 && primary.bottom < bounds.height() * 3 / 4) {
+            // Start cleanly below the live top split app + horizontal split divider bar.
+            startY = primary.bottom + Ui.dp(this, 12);
+        } else {
+            int topInset = 0;
+            int bottomInset = 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets insets = manager.getCurrentWindowMetrics().getWindowInsets()
+                        .getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                topInset = insets.top;
+                bottomInset = insets.bottom;
+            }
+            startY = (topInset + bounds.height() - bottomInset) / 2 + Ui.dp(this, 10);
+        }
+        int secondaryH = Math.max(Ui.dp(this, 240), bounds.height() - startY);
+        return Math.min(bounds.height(), secondaryH + seamGuard);
+    }
+
     private void showSplitPicker(int request, String primaryPackage, Intent primaryIntent,
             ComponentName primaryActivity, boolean animateIn) {
         if (request != splitRequest || !running || splitPicker != null || menu != null
@@ -1087,8 +1130,10 @@ public class DockService extends Service {
         Rect bounds = displayBounds();
         boolean landscape = bounds.width() >= bounds.height();
         int seamGuard = Ui.dp(this, 20);
-        int width = landscape ? bounds.width() / 2 + seamGuard : WindowManager.LayoutParams.MATCH_PARENT;
-        int height = landscape ? WindowManager.LayoutParams.MATCH_PARENT : bounds.height() / 2 + seamGuard;
+        int width = landscape ? splitPickerDimension(bounds, true, primaryPackage, seamGuard)
+                : WindowManager.LayoutParams.MATCH_PARENT;
+        int height = landscape ? WindowManager.LayoutParams.MATCH_PARENT
+                : splitPickerDimension(bounds, false, primaryPackage, seamGuard);
         Set<String> excluded = new HashSet<>(WindowModeMonitor.floatingPackages());
         if (primaryPackage != null) excluded.add(primaryPackage);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(width, height,
@@ -1108,6 +1153,9 @@ public class DockService extends Service {
             SplitAppPicker closing = splitPicker;
             int closeRequest = ++splitRequest;
             splitPicker = null;
+            splitPickerPackage = null;
+            splitPickerIntent = null;
+            splitPickerActivity = null;
             if (closing != null) {
                 params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
@@ -1119,8 +1167,10 @@ public class DockService extends Service {
                 if (closing != null) removeOverlay(closing);
                 return;
             }
+            int closingW = landscape ? params.width : bounds.width();
+            int closingH = landscape ? bounds.height() : params.height;
             expandPrimaryToFullscreen(closeRequest, closing, primaryIntent, primaryActivity,
-                    bounds, landscape, width, height);
+                    bounds, landscape, closingW, closingH);
         };
         SplitAppPicker picker = new SplitAppPicker(Appearance.localize(this), shortcuts, entries,
                 WindowModeMonitor.recentPackages(this), excluded, background,
@@ -1148,6 +1198,9 @@ public class DockService extends Service {
         try {
             manager.addView(picker, params);
             splitPicker = picker;
+            splitPickerPackage = primaryPackage;
+            splitPickerIntent = primaryIntent == null ? null : new Intent(primaryIntent);
+            splitPickerActivity = primaryActivity;
             picker.requestFocus();
             if (animateIn) {
                 picker.animate()
@@ -1165,6 +1218,23 @@ public class DockService extends Service {
                         .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f))
                         .start();
             }
+            // Re-verify primary split bounds shortly after launch/rotation so vertical & horizontal
+            // split dividers align tightly without overlapping the primary app.
+            main.postDelayed(() -> {
+                if (splitPicker != picker || request != splitRequest || !running || !picker.isAttachedToWindow()) return;
+                Rect latest = displayBounds();
+                boolean stillLandscape = latest.width() >= latest.height();
+                if (stillLandscape != landscape) return;
+                int updatedDim = splitPickerDimension(latest, landscape, primaryPackage, seamGuard);
+                int currentDim = landscape ? params.width : params.height;
+                if (Math.abs(updatedDim - currentDim) > Ui.dp(this, 3)) {
+                    if (landscape) params.width = updatedDim;
+                    else params.height = updatedDim;
+                    try {
+                        manager.updateViewLayout(picker, params);
+                    } catch (RuntimeException ignored) { }
+                }
+            }, 220);
         } catch (WindowManager.BadTokenException | SecurityException unavailable) {
             android.util.Log.w("PenDock", "Could not show split app picker", unavailable);
         }
@@ -1359,6 +1429,9 @@ public class DockService extends Service {
 
     private void cancelSplitPicker() {
         splitRequest++;
+        splitPickerPackage = null;
+        splitPickerIntent = null;
+        splitPickerActivity = null;
         if (splitPicker == null) return;
         SplitAppPicker removed = splitPicker;
         splitPicker = null;

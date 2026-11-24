@@ -151,6 +151,35 @@ public class WindowModeMonitor extends AccessibilityService {
                 ? null : connected.readFloatingWindowBounds(packageName);
     }
 
+    static Rect splitPrimaryBounds(String packageName) {
+        return connected == null || !connected.tracking
+                ? null : connected.readSplitPrimaryBounds(packageName);
+    }
+
+    private Rect readSplitPrimaryBounds(String packageName) {
+        List<AccessibilityWindowInfo> windows = getWindows();
+        try {
+            Rect display = usableDisplay();
+            Rect fallback = null;
+            for (AccessibilityWindowInfo window : windows) {
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION
+                        || window.isInPictureInPictureMode()) continue;
+                Rect bounds = new Rect();
+                window.getBoundsInScreen(bounds);
+                if (bounds.isEmpty()) continue;
+                boolean spansWidth = spansAxis(bounds.left, bounds.right, display.left, display.right);
+                boolean spansHeight = spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
+                if (spansWidth == spansHeight || !isDockedSplit(bounds, display, spansWidth)) continue;
+                String pkg = windowPackageName(window);
+                if (packageName != null && packageName.equals(pkg)) return bounds;
+                if (fallback == null) fallback = bounds;
+            }
+            return fallback;
+        } finally {
+            for (AccessibilityWindowInfo window : windows) window.recycle();
+        }
+    }
+
     static FloatingWindow findFloatingWindow(String packageName) {
         return connected == null || !connected.tracking || packageName == null
                 ? null : connected.readExactFloatingWindow(packageName);
