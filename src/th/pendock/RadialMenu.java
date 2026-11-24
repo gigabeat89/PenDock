@@ -422,7 +422,7 @@ final class RadialMenu extends FrameLayout {
     @Override public boolean onTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
         if (penOnly && action == MotionEvent.ACTION_DOWN
-                && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+                && !PenInput.isPen(event, 0)) {
             dismiss();
             return true;
         }

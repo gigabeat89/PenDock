@@ -35,6 +35,7 @@ import android.widget.Toast;
 import java.io.OutputStream;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +88,9 @@ public class DockService extends Service {
     private CircleSelection circleSelection;
     private SplitAppPicker splitPicker;
     private LaserOverlay laserOverlay;
+    private FloatingPulse floatingPulse;
+    private final android.util.LruCache<Integer, Float> floatingScales = new android.util.LruCache<>(16);
+    private int pulseRequest;
     private Bitmap circleFrame;
     private int circleRequest;
     private int splitRequest;
@@ -127,6 +131,7 @@ public class DockService extends Service {
             cancelCircleSearch();
             cancelSplitPicker();
             cancelLaserOverlay();
+            cancelFloatingPulse();
             detach();
         }
     };
@@ -186,6 +191,8 @@ public class DockService extends Service {
                 registerReceiver(packagesChanged, packages);
             }
             listening = true;
+            WindowModeMonitor.setFloatingPingListener((windowId, packageName, bounds) ->
+                    main.post(() -> showFloatingPulse(windowId, packageName, bounds, false)));
         }
         return START_STICKY;
     }
@@ -222,6 +229,7 @@ public class DockService extends Service {
             return;
         }
         WindowModeMonitor.FocusedApp focused = WindowModeMonitor.focusedApp();
+        Map<String, WindowModeMonitor.FloatingWindow> openFloating = WindowModeMonitor.floatingWindows();
         String foreground = focused != null && focused.activity != null
                 ? focused.activity.getPackageName() : null;
         if (useHover && exclusions.contains(foreground)) {
@@ -232,13 +240,14 @@ public class DockService extends Service {
         int blurDp = RingConfig.ringBlurDp(this);
         if (blurDp > 0 && Build.VERSION.SDK_INT >= 31
                 && !manager.isCrossWindowBlurEnabled() && CircleCaptureService.isReady()) {
-            CircleCaptureService.capture(frame -> attachMenu(request, useHover, focused, frame));
+            CircleCaptureService.capture(frame -> attachMenu(request, useHover, focused, openFloating, frame));
             return;
         }
-        attachMenu(request, useHover, focused, null);
+        attachMenu(request, useHover, focused, openFloating, null);
     }
 
-    private void attachMenu(int request, boolean useHover, WindowModeMonitor.FocusedApp focused, Bitmap blurFrame) {
+    private void attachMenu(int request, boolean useHover, WindowModeMonitor.FocusedApp focused,
+            Map<String, WindowModeMonitor.FloatingWindow> openFloating, Bitmap blurFrame) {
         if (request != menuRequest || !running || menu != null || circleSelection != null
                 || splitPicker != null || laserOverlay != null
                 || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
@@ -250,18 +259,32 @@ public class DockService extends Service {
             stopSelf();
             return;
         }
+        if (blurFrame != null && openFloating != null && !openFloating.isEmpty()
+                && "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)) {
+            for (Map.Entry<String, WindowModeMonitor.FloatingWindow> entry : openFloating.entrySet()) {
+                WindowModeMonitor.FloatingWindow fw = entry.getValue();
+                float measured = measureHuaweiFloatingScale(blurFrame, fw.bounds);
+                if (measured > 0f) {
+                    if (fw.windowId >= 0) floatingScales.put(fw.windowId, measured);
+                    savePackageScale(entry.getKey(), measured);
+                }
+            }
+        }
         Rect bounds = displayBounds();
         Intent activeTarget = SystemScreenshot.isReady() && SystemScreenshot.tracksActiveApp() && focused != null
                 ? focused.floatingIntent : null;
         boolean alreadyWindowed = focused != null && focused.alreadyWindowed;
         boolean alreadySplit = focused != null && focused.alreadySplit;
+        RadialMenu[] menuRef = new RadialMenu[1];
         RadialMenu opened = new RadialMenu(menuContext, bounds.exactCenterX(), bounds.exactCenterY(), useHover,
-                this::lockScreen, this::takeScreenshot, this::startCircleSearch, this::startLaserPointer, this::detach,
-                entries, app -> openShortcut(app, focused), "—",
+                this::lockScreen, this::takeScreenshot, this::startCircleSearch, this::startLaserPointer,
+                () -> detach(menuRef[0]),
+                entries, app -> openShortcut(app, focused, openFloating), "—",
                 activeTarget == null || alreadyWindowed ? null : () -> floatActive(activeTarget, focused),
                 alreadyWindowed,
                 activeTarget == null || alreadySplit || alreadyWindowed ? null : () -> splitActive(activeTarget, focused),
                 alreadySplit, blurFrame);
+        menuRef[0] = opened;
         int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
         int blurDp = RingConfig.ringBlurDp(this);
         boolean nativeBlur = blurFrame == null && blurDp > 0 && Build.VERSION.SDK_INT >= 31
@@ -504,25 +527,46 @@ public class DockService extends Service {
         }
     }
 
-    private void openShortcut(Shortcuts.Entry app, WindowModeMonitor.FocusedApp focused) {
+    private void openShortcut(Shortcuts.Entry app, WindowModeMonitor.FocusedApp focused,
+            Map<String, WindowModeMonitor.FloatingWindow> openFloating) {
         String mode = RingConfig.launchMode(this);
         if (RingConfig.LAUNCH_SPLIT.equals(mode)) {
             openAppInSplit(app, focused);
             return;
         }
-        openApp(app.id, app.label, RingConfig.LAUNCH_FLOATING.equals(mode));
+        WindowModeMonitor.FloatingWindow alreadyFloating = openFloating == null ? null : openFloating.get(app.id);
+        openApp(app.id, app.label, RingConfig.LAUNCH_FLOATING.equals(mode), alreadyFloating);
     }
 
-    private void openApp(String packageName, String label, boolean floating) {
+    private void openApp(String packageName, String label, boolean floating,
+            WindowModeMonitor.FloatingWindow alreadyFloating) {
         Intent intent = getPackageManager().getLaunchIntentForPackage(packageName);
         if (intent == null) {
             detach();
             Toast.makeText(this, Appearance.text(this, R.string.open_named_failed, label), Toast.LENGTH_SHORT).show();
             return;
         }
+        if (alreadyFloating == null) {
+            alreadyFloating = WindowModeMonitor.findFloatingWindow(packageName);
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         WindowModeMonitor.recordRecent(this, packageName);
-        launch(intent, floating ? floatingOptions() : null);
+        Bundle options;
+        if (alreadyFloating != null) {
+            options = floatingKeepBoundsOptions();
+        } else {
+            options = floating ? floatingOptions() : null;
+        }
+        launch(intent, options);
+        if (alreadyFloating != null) {
+            main.postDelayed(() -> {
+                if (!running || splitTransitioning) return;
+                WindowModeMonitor.FloatingWindow stillFloating = WindowModeMonitor.findFloatingWindow(packageName);
+                if (stillFloating != null && !stillFloating.bounds.isEmpty()) {
+                    showFloatingPulse(stillFloating.windowId, packageName, stillFloating.bounds, true);
+                }
+            }, 180);
+        }
     }
 
     private void openAppInSplit(Shortcuts.Entry app, WindowModeMonitor.FocusedApp focused) {
@@ -1172,14 +1216,11 @@ public class DockService extends Service {
                         return;
                     }
                     Rect liveTarget = WindowModeMonitor.floatingWindowBounds(targetPkg);
-                    Rect target = liveTarget != null && !liveTarget.isEmpty()
-                            ? new Rect(liveTarget) : floatingBounds();
-                    if ("HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)) {
-                        // HarmonyOS reports unscaled task bounds in AccessibilityWindowInfo, while
-                        // SurfaceFlinger renders hwMultiwindow-freeform at ~0.816 scale from top-left.
-                        target.right = target.left + Math.round(target.width() * 0.816f);
-                        target.bottom = target.top + Math.round(target.height() * 0.816f);
-                    }
+                    float targetScale = rememberedPackageScale(targetPkg);
+                    Rect target = visibleFloatingBounds(liveTarget != null && !liveTarget.isEmpty()
+                            ? liveTarget : floatingBounds(), targetScale);
+                    float targetRadius = "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)
+                            ? Ui.dp(this, 24) * targetScale : maxRadius;
                     int targetW = Math.max(1, target.width());
                     int targetH = Math.max(1, target.height());
 
@@ -1204,7 +1245,7 @@ public class DockService extends Service {
                         clipRect[1] = cT;
                         clipRect[2] = cR;
                         clipRect[3] = cB;
-                        cornerRadius[0] = maxRadius * t / Math.max(0.2f, scale);
+                        cornerRadius[0] = targetRadius * t / Math.max(0.2f, scale);
                         card.setScaleX(scale);
                         card.setScaleY(scale);
                         card.setTranslationX(curL - start.left - cL * scale);
@@ -1217,7 +1258,10 @@ public class DockService extends Service {
                             card.animate()
                                     .alpha(0f)
                                     .setDuration(100)
-                                    .withEndAction(cleanup)
+                                    .withEndAction(() -> {
+                                        cleanup.run();
+                                        calibrateFloatingScale(targetPkg);
+                                    })
                                     .start();
                         }
                     });
@@ -1281,21 +1325,277 @@ public class DockService extends Service {
     }
 
     private void detach() {
+        detach(menu);
+    }
+
+    private void detach(RadialMenu target) {
         menuRequest++;
-        if (menu == null) return;
-        RadialMenu removed = menu;
-        menu = null;
+        if (target != null && target == menu) menu = null;
+        removeOverlay(target);
+    }
+
+    private Bundle floatingKeepBoundsOptions() {
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT)) {
+            return null;
+        }
+        Bundle options = ActivityOptions.makeBasic().toBundle();
+        boolean huawei = "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER);
+        options.putInt("android.activity.windowingMode", huawei ? 102 : 5);
+        return options;
+    }
+
+    private float rememberedPackageScale(String packageName) {
+        if (!"HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)) return 1f;
+        if (packageName != null) {
+            float saved = getSharedPreferences("floating_scales", MODE_PRIVATE).getFloat(packageName, -1f);
+            if (saved >= 0.48f && saved <= 1.05f) return saved;
+        }
+        return 0.816f;
+    }
+
+    private void savePackageScale(String packageName, float scale) {
+        if (packageName == null || scale < 0.48f || scale > 1.05f) return;
+        getSharedPreferences("floating_scales", MODE_PRIVATE).edit().putFloat(packageName, scale).apply();
+    }
+
+    private void calibrateFloatingScale(String packageName) {
+        if (packageName == null || !"HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)
+                || Build.VERSION.SDK_INT < 30 || !CircleCaptureService.isReady()) return;
+        main.postDelayed(() -> {
+            if (!running || splitTransitioning || menu != null
+                    || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+            WindowModeMonitor.FloatingWindow fw = WindowModeMonitor.findFloatingWindow(packageName);
+            if (fw == null || fw.bounds.isEmpty()) return;
+            CircleCaptureService.capture(frame -> {
+                if (frame == null) return;
+                float measured = -1f;
+                try {
+                    measured = measureHuaweiFloatingScale(frame, fw.bounds);
+                } finally {
+                    frame.recycle();
+                }
+                if (measured > 0f) {
+                    if (fw.windowId >= 0) floatingScales.put(fw.windowId, measured);
+                    savePackageScale(packageName, measured);
+                }
+            });
+        }, 320);
+    }
+
+    private Rect visibleFloatingBounds(Rect taskBounds, float scale) {
+        Rect rect = new Rect(taskBounds);
+        if (scale > 0f && Math.abs(scale - 1f) > 0.001f) {
+            rect.right = rect.left + Math.round(rect.width() * scale);
+            rect.bottom = rect.top + Math.round(rect.height() * scale);
+        }
+        return rect;
+    }
+
+    private void showFloatingPulse(int windowId, String packageName, Rect rawBounds, boolean allowRecentFrame) {
+        if (!running || manager == null || rawBounds == null || rawBounds.isEmpty()
+                || splitTransitioning || !Settings.canDrawOverlays(this)
+                || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+            return;
+        }
+        int request = ++pulseRequest;
+        boolean huawei = "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER);
+        if (huawei && Build.VERSION.SDK_INT >= 30 && CircleCaptureService.isReady()) {
+            // Wait ~80ms so HarmonyOS updates the focused floating handle pill and brings it forward,
+            // then measure the live SurfaceFlinger scale (handles resized windows & mini-windows).
+            main.postDelayed(() -> {
+                if (request != pulseRequest || !running || splitTransitioning
+                        || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+                java.util.function.Consumer<Bitmap> onFrame = frame -> {
+                    float scale = -1f;
+                    if (frame != null) {
+                        try {
+                            scale = measureHuaweiFloatingScale(frame, rawBounds);
+                        } finally {
+                            frame.recycle();
+                        }
+                    }
+                    if (request != pulseRequest || !running || splitTransitioning
+                            || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+                    if (scale > 0f) {
+                        if (windowId >= 0) floatingScales.put(windowId, scale);
+                        savePackageScale(packageName, scale);
+                    } else {
+                        Float cached = windowId >= 0 ? floatingScales.get(windowId) : null;
+                        scale = cached != null ? cached : rememberedPackageScale(packageName);
+                    }
+                    renderFloatingPulse(visibleFloatingBounds(rawBounds, scale), Ui.dp(this, 24) * scale);
+                };
+                if (allowRecentFrame) CircleCaptureService.captureOrRecent(onFrame);
+                else CircleCaptureService.capture(onFrame);
+            }, allowRecentFrame ? 30 : 80);
+            return;
+        }
+        float scale = rememberedPackageScale(packageName);
+        float radius = huawei ? Ui.dp(this, 24) * scale : Ui.dp(this, 20);
+        renderFloatingPulse(visibleFloatingBounds(rawBounds, scale), radius);
+    }
+
+    private float measureHuaweiFloatingScale(Bitmap frame, Rect taskBounds) {
+        Rect display = displayBounds();
+        int screenW = Math.max(1, display.width());
+        int screenH = Math.max(1, display.height());
+        int fw = frame.getWidth();
+        int fh = frame.getHeight();
+        float fx = fw / (float) screenW;
+        float fy = fh / (float) screenH;
+
+        float bLeft = taskBounds.left * fx;
+        float bTop = taskBounds.top * fy;
+        float bUw = taskBounds.width() * fx;
+        if (bUw < 60f) return -1f;
+
+        int scanStartX = Math.max(0, Math.round(bLeft + 24f * fx));
+        int scanEndX = Math.min(fw, Math.round(bLeft + bUw));
+        int scanW = scanEndX - scanStartX;
+        if (scanW < 40) return -1f;
+        int startY = Math.max(0, Math.round(bTop + 10f * fy));
+        int endY = Math.min(fh - 1, Math.round(bTop + 68f * fy));
+        if (endY <= startY) return -1f;
+
+        // Pass 1: Focused HarmonyOS floating handle pill (vivid royal blue centered in a uniform caption bar).
+        int[] row = new int[scanW];
+        int bestLen = 0;
+        float bestScale = -1f;
+        for (int y = startY; y <= endY; y += 2) {
+            frame.getPixels(row, 0, scanW, scanStartX, y, scanW, 1);
+            int runStart = -1;
+            for (int i = 0; i <= scanW; i++) {
+                boolean isPill = false;
+                if (i < scanW) {
+                    int rgb = row[i];
+                    int r = (rgb >> 16) & 0xff;
+                    int g = (rgb >> 8) & 0xff;
+                    int b = rgb & 0xff;
+                    isPill = b >= 215 && (b - r) >= 160 && (b - g) >= 110;
+                }
+                if (isPill) {
+                    if (runStart < 0) runStart = i;
+                } else if (runStart >= 0) {
+                    int len = i - runStart;
+                    if (len >= 28 && len > bestLen) {
+                        int leftBgIdx = Math.max(0, runStart - Math.round(16f * fx));
+                        int rightBgIdx = Math.min(scanW - 1, i + Math.round(15f * fx));
+                        int cL = row[leftBgIdx];
+                        int cR = row[rightBgIdx];
+                        int bgDiff = Math.abs(((cL >> 16) & 0xff) - ((cR >> 16) & 0xff))
+                                + Math.abs(((cL >> 8) & 0xff) - ((cR >> 8) & 0xff))
+                                + Math.abs((cL & 0xff) - (cR & 0xff));
+                        float cx = scanStartX + (runStart + i - 1) * 0.5f;
+                        float s = (cx - bLeft) * 2f / bUw;
+                        float expectedY = bTop + 43f * s * fy;
+                        float expectedLen = 135f * s * fx;
+                        if (bgDiff <= 30
+                                && s >= 0.32f && s <= 1.05f
+                                && bLeft + bUw * s <= fw + 24f * fx
+                                && Math.abs(y - expectedY) <= 22f * fy
+                                && len >= expectedLen * 0.45f
+                                && len <= expectedLen * 1.65f) {
+                            bestLen = len;
+                            bestScale = s;
+                        }
+                    }
+                    runStart = -1;
+                }
+            }
+        }
+        if (bestScale > 0f) return bestScale;
+
+        // Pass 2: Mini-windows and unfocused/transitioning windows without a blue handle pill:
+        // sample the clean caption background above the icons (left+120, top+12) and scan right across
+        // multiple header rows to locate the rendered right edge of the floating window.
+        int refX = Math.max(0, Math.min(fw - 1, Math.round(bLeft + 120f * fx)));
+        int refY = Math.max(0, Math.min(fh - 1, Math.round(bTop + 12f * fy)));
+        int flatScanW = Math.min(fw, Math.round(bLeft + bUw)) - refX;
+        if (flatScanW < 60) return -1f;
+        int refRgb = frame.getPixel(refX, refY);
+        int rr = (refRgb >> 16) & 0xff;
+        int rg = (refRgb >> 8) & 0xff;
+        int rb = refRgb & 0xff;
+        int[] flatRow = new int[flatScanW];
+        int maxRight = -1;
+        int[] sampleDys = {8, 10, 12, 14, 16, 20, 24, 28, 32};
+        for (int dy : sampleDys) {
+            int y = Math.round(bTop + dy * fy);
+            if (y < 0 || y >= fh) continue;
+            frame.getPixels(flatRow, 0, flatScanW, refX, y, flatScanW, 1);
+            int lastMatch = 0;
+            int miss = 0;
+            for (int i = 0; i < flatScanW; i++) {
+                int rgb = flatRow[i];
+                int diff = Math.abs(((rgb >> 16) & 0xff) - rr)
+                        + Math.abs(((rgb >> 8) & 0xff) - rg)
+                        + Math.abs((rgb & 0xff) - rb);
+                if (diff <= 34) {
+                    lastMatch = i;
+                    miss = 0;
+                } else if (++miss >= 24) {
+                    break;
+                }
+            }
+            int rightX = refX + lastMatch + 1;
+            if (rightX > maxRight) maxRight = rightX;
+        }
+        if (maxRight > refX + 60) {
+            float s = (maxRight - bLeft) / bUw;
+            if (s >= 0.34f && s <= 1.05f && bLeft + bUw * s <= fw + 24f * fx) {
+                return s;
+            }
+        }
+        return -1f;
+    }
+
+    private void renderFloatingPulse(Rect target, float cornerRadiusPx) {
+        if (!running || manager == null || target.width() < 20 || target.height() < 20) return;
+        cancelFloatingPulse();
+        FloatingPulse[] holder = new FloatingPulse[1];
+        FloatingPulse pulse = new FloatingPulse(this, target, cornerRadiusPx, () -> {
+            if (floatingPulse == holder[0]) cancelFloatingPulse();
+        });
+        holder[0] = pulse;
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        params.setTitle("PenDock floating pulse");
+        params.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= 30) {
+            params.setFitInsetsTypes(0);
+            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        try {
+            manager.addView(pulse, params);
+            floatingPulse = pulse;
+            pulse.start();
+        } catch (RuntimeException unavailable) {
+            pulse.stop();
+        }
+    }
+
+    private void cancelFloatingPulse() {
+        pulseRequest++;
+        if (floatingPulse == null) return;
+        FloatingPulse removed = floatingPulse;
+        floatingPulse = null;
+        removed.stop();
         removeOverlay(removed);
     }
 
     private void removeOverlay(View view) {
-        if (manager == null || view == null || !view.isAttachedToWindow()) return;
+        if (manager == null || view == null) return;
         try {
             manager.removeViewImmediate(view);
         } catch (IllegalArgumentException ignored) { }
     }
 
     @Override public void onDestroy() {
+        WindowModeMonitor.setFloatingPingListener(null);
         if (listening) {
             unregisterReceiver(stylus);
             unregisterReceiver(screenChange);
@@ -1307,6 +1607,7 @@ public class DockService extends Service {
         cancelCircleSearch();
         cancelSplitPicker();
         cancelLaserOverlay();
+        cancelFloatingPulse();
         background.shutdown();
         detach();
         setRunning(false);
