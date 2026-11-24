@@ -127,6 +127,25 @@ public class WindowModeMonitor extends AccessibilityService {
         return connected == null || !connected.tracking ? new HashSet<>() : connected.readFloatingPackages();
     }
 
+    static Set<String> visibleAppPackages() {
+        return connected == null || !connected.tracking ? new HashSet<>() : connected.readVisibleAppPackages();
+    }
+
+    private Set<String> readVisibleAppPackages() {
+        Set<String> result = new HashSet<>();
+        List<AccessibilityWindowInfo> windows = getWindows();
+        try {
+            for (AccessibilityWindowInfo window : windows) {
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                String pkg = windowPackageName(window);
+                if (pkg != null && !isHomePackage(pkg)) result.add(pkg);
+            }
+            return result;
+        } finally {
+            for (AccessibilityWindowInfo window : windows) window.recycle();
+        }
+    }
+
     static Rect floatingWindowBounds(String packageName) {
         return connected == null || !connected.tracking
                 ? null : connected.readFloatingWindowBounds(packageName);
