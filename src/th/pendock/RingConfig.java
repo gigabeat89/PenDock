@@ -8,6 +8,13 @@ final class RingConfig {
     static final String SIZE_NORMAL = "normal";
     static final String SIZE_LARGE = "large";
 
+    static final String STYLE_PETALS = "petals";
+    static final String STYLE_ORBIT = "orbit";
+    static final String STYLE_HALO = "halo";
+    static final String STYLE_HEXA = "hexa";
+    static final String STYLE_DIAL = "dial";
+    static final String STYLE_MINIMAL = "minimal";
+
     static final String LAUNCH_FLOATING = "floating";
     static final String LAUNCH_SPLIT = "split";
     static final String LAUNCH_FULLSCREEN = "fullscreen";
@@ -17,6 +24,7 @@ final class RingConfig {
     static final String WINDOW_LARGE = "large";
 
     private static final String RING_SIZE = "ring_size";
+    private static final String RING_STYLE = "ring_style";
     private static final String RING_DIM = "ring_dim_percent";
     private static final String RING_BLUR = "ring_blur_dp";
     private static final String LAUNCH_MODE = "launch_mode";
@@ -49,6 +57,20 @@ final class RingConfig {
         if (SIZE_SMALL.equals(size)) return 0.84f;
         if (SIZE_LARGE.equals(size)) return 1.18f;
         return 1.0f;
+    }
+
+    static String ringStyle(Context context) {
+        String value = prefs(context).getString(RING_STYLE, STYLE_PETALS);
+        if (STYLE_ORBIT.equals(value) || STYLE_HALO.equals(value)
+                || STYLE_HEXA.equals(value) || STYLE_DIAL.equals(value)
+                || STYLE_MINIMAL.equals(value)) {
+            return value;
+        }
+        return STYLE_PETALS;
+    }
+
+    static void setRingStyle(Context context, String style) {
+        prefs(context).edit().putString(RING_STYLE, style).apply();
     }
 
     static int ringDimPercent(Context context) {

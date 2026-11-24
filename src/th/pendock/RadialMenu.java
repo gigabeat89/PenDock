@@ -48,12 +48,15 @@ final class RadialMenu extends FrameLayout {
     private final int iconHalf, hubHalfWidth, highlightOffset;
     private final int[] screenOrigin = new int[2];
     private final Path segment = new Path();
+    private final Path hubHex = new Path();
+    private final Path cellHex = new Path();
     private final Region segmentHitArea = new Region();
     private final float fallbackX, fallbackY;
     private final TextView hub, batteryStatus;
     private final Runnable close;
     private final boolean penOnly, preview, requireHover, useSeparateSurface;
     private final float maxScale;
+    private final String style;
     private final Appearance.Palette colors;
     private final Runnable fallback = this::revealAtCenter;
     private boolean waitingForHover;
@@ -105,6 +108,7 @@ final class RadialMenu extends FrameLayout {
         useSeparateSurface = !preview && "huawei".equalsIgnoreCase(Build.MANUFACTURER)
                 && !WindowModeMonitor.isReady() && !SystemScreenshot.isReady() && !CircleCaptureService.isReady();
         maxScale = RingConfig.ringScale(context);
+        style = RingConfig.ringStyle(context);
         dimAlpha = RingConfig.ringDimAlpha(context);
         colors = Ui.colors(context);
         this.fallbackX = fallbackX;
@@ -294,9 +298,11 @@ final class RadialMenu extends FrameLayout {
         float innerRadius = dp(61) * scale;
         iconOrbit = lerp(innerRadius, outerRadius, .54f);
         if (buttons.length > 0) buildSegment(innerRadius);
+        buildRoundedHexagon(hubHex, dp(HUB_RADIUS_DP + 3) * scale, dp(10) * scale);
+        buildRoundedHexagon(cellHex, cellRadius() * 1.08f, dp(8) * scale);
         updateArtwork();
         if (revealed) place(anchorX, anchorY);
-        else if (hasWindowFocus()) prepareReveal();
+        else if (preview || hasWindowFocus()) prepareReveal();
     }
 
     private void buildSegment(float innerRadius) {
@@ -481,8 +487,27 @@ final class RadialMenu extends FrameLayout {
     }
 
     private int sectorAt(float x, float y) {
-        if (!revealed || ring.getAlpha() < .65f) return -1;
+        if (!revealed || ring.getAlpha() < .65f || buttons.length == 0) return -1;
         float dx = x - centerX, dy = y - centerY;
+        if (!RingConfig.STYLE_PETALS.equals(style)) {
+            float dist = (float) Math.hypot(dx, dy);
+            float minR = dp(HUB_RADIUS_DP + 4) * scale;
+            float maxR = outerRadius + dp(12) * scale;
+            if (dist < minR || dist > maxR) return -1;
+            int best = -1;
+            float bestDot = -2f;
+            float inv = 1f / Math.max(1f, dist);
+            float nx = dx * inv;
+            float ny = dy * inv;
+            for (int index = 0; index < buttons.length; index++) {
+                float dot = nx * directionX[index] + ny * directionY[index];
+                if (dot > bestDot) {
+                    bestDot = dot;
+                    best = index;
+                }
+            }
+            return best;
+        }
         for (int index = 0; index < buttons.length; index++) {
             float across = -dx * directionY[index] + dy * directionX[index];
             float inward = -dx * directionX[index] - dy * directionY[index];
@@ -491,6 +516,41 @@ final class RadialMenu extends FrameLayout {
                             Math.round(inward + segmentOffset(index)))) return index;
         }
         return -1;
+    }
+
+    private float cellRadius() {
+        float maxBySpacing = buttons.length <= 1 ? dp(30) * scale
+                : (float) (iconOrbit * Math.sin(Math.PI / buttons.length)) - dp(3.5f) * scale;
+        return Math.max(dp(22) * scale, Math.min(dp(30) * scale, maxBySpacing));
+    }
+
+    private void buildRoundedHexagon(Path out, float radius, float corner) {
+        out.reset();
+        if (radius <= 0f) return;
+        float[] vx = new float[6];
+        float[] vy = new float[6];
+        for (int i = 0; i < 6; i++) {
+            double a = Math.toRadians(-90.0 + i * 60.0);
+            vx[i] = (float) (Math.cos(a) * radius);
+            vy[i] = (float) (Math.sin(a) * radius);
+        }
+        float c = Math.min(corner, radius * 0.36f);
+        for (int i = 0; i < 6; i++) {
+            int prev = (i + 5) % 6;
+            int next = (i + 1) % 6;
+            float dx1 = vx[prev] - vx[i], dy1 = vy[prev] - vy[i];
+            float len1 = (float) Math.hypot(dx1, dy1);
+            float dx2 = vx[next] - vx[i], dy2 = vy[next] - vy[i];
+            float len2 = (float) Math.hypot(dx2, dy2);
+            float sx = vx[i] + dx1 / len1 * c;
+            float sy = vy[i] + dy1 / len1 * c;
+            float ex = vx[i] + dx2 / len2 * c;
+            float ey = vy[i] + dy2 / len2 * c;
+            if (i == 0) out.moveTo(sx, sy);
+            else out.lineTo(sx, sy);
+            out.quadTo(vx[i], vy[i], ex, ey);
+        }
+        out.close();
     }
 
     private void revealAtCenter() {
@@ -509,7 +569,7 @@ final class RadialMenu extends FrameLayout {
     }
 
     private void reveal(float x, float y) {
-        if (revealed || closing || !isAttachedToWindow() || !hasWindowFocus()) return;
+        if (revealed || closing || !isAttachedToWindow() || (!preview && !hasWindowFocus())) return;
         place(x, y);
         revealed = true;
         boolean animate = !preview && ValueAnimator.areAnimatorsEnabled();
@@ -667,6 +727,10 @@ final class RadialMenu extends FrameLayout {
     private final class Ring extends FrameLayout {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF arcBounds = new RectF();
+        private final RectF innerArcBounds = new RectF();
+        private final Path slicePath = new Path();
+        private final Path pointerPath = new Path();
 
         Ring(Context context) {
             super(context);
@@ -682,7 +746,24 @@ final class RadialMenu extends FrameLayout {
             float hubRadius = dp(HUB_RADIUS_DP) * scale;
             float shadowRadius = Math.max(1f, dp(9.5f) * scale);
 
+            if (RingConfig.STYLE_ORBIT.equals(style)) {
+                drawOrbit(canvas, middle, hubRadius, shadowRadius);
+            } else if (RingConfig.STYLE_HALO.equals(style)) {
+                drawGlassHalo(canvas, middle, hubRadius, shadowRadius);
+            } else if (RingConfig.STYLE_HEXA.equals(style)) {
+                drawHexa(canvas, middle, shadowRadius);
+            } else if (RingConfig.STYLE_DIAL.equals(style)) {
+                drawDial(canvas, middle, hubRadius, shadowRadius);
+            } else if (RingConfig.STYLE_MINIMAL.equals(style)) {
+                drawMinimal(canvas, middle, hubRadius, shadowRadius);
+            } else {
+                drawPetals(canvas, middle, hubRadius, shadowRadius);
+            }
+        }
+
+        private void drawPetals(Canvas canvas, float middle, float hubRadius, float shadowRadius) {
             // Pass 1: cast soft shadows behind both hub and petals so shadows never muddy adjacent petals.
+            shadowPaint.setStyle(Paint.Style.FILL);
             shadowPaint.setColor(colors.core);
             shadowPaint.setShadowLayer(shadowRadius, 0f, 0f, colors.ringShadow);
             canvas.drawCircle(middle, middle, hubRadius, shadowPaint);
@@ -722,6 +803,424 @@ final class RadialMenu extends FrameLayout {
                 canvas.restoreToCount(segmentSave);
             }
             canvas.restoreToCount(ringSave);
+        }
+
+        private void drawOrbit(Canvas canvas, float middle, float hubRadius, float shadowRadius) {
+            float baseRadius = cellRadius();
+            // Delicate orbital guide connecting all floating bubbles.
+            if (buttons.length > 0) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(1f, dp(1.5f) * scale));
+                paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 110 : 75));
+                canvas.drawCircle(middle, middle, iconOrbit, paint);
+            }
+
+            // Pass 1: soft shadows behind hub and bubbles.
+            shadowPaint.setStyle(Paint.Style.FILL);
+            shadowPaint.setColor(colors.core);
+            shadowPaint.setShadowLayer(shadowRadius, 0f, 0f, colors.ringShadow);
+            canvas.drawCircle(middle, middle, hubRadius, shadowPaint);
+            for (int index = 0; index < buttons.length; index++) {
+                float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                float dist = iconOrbit + segmentOffset(index);
+                float bx = middle + directionX[index] * dist;
+                float by = middle + directionY[index] * dist;
+                float r = baseRadius + dp(2.4f) * scale * selected;
+                canvas.drawCircle(bx, by, r, shadowPaint);
+            }
+
+            // Pass 2: crisp circular hub + orbiting bubbles.
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(colors.core);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, dp(1f) * scale));
+            paint.setColor(colors.ringBorder);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
+
+            for (int index = 0; index < buttons.length; index++) {
+                float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                float dist = iconOrbit + segmentOffset(index);
+                float bx = middle + directionX[index] * dist;
+                float by = middle + directionY[index] * dist;
+                float r = baseRadius + dp(2.4f) * scale * selected;
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(buttons[index].isEnabled()
+                        ? blend(colors.petal, colors.petalSelected, selected) : colors.petalDisabled);
+                canvas.drawCircle(bx, by, r, paint);
+
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(1f, dp(lerp(0.9f, 1.8f, selected)) * scale));
+                paint.setColor(selected > 0.01f
+                        ? blendArgb(colors.ringBorder, withAlpha(colors.accent, 220), selected)
+                        : colors.ringBorder);
+                canvas.drawCircle(bx, by, r, paint);
+            }
+        }
+
+        private void buildAnnularSlice(Path out, float cx, float cy, float rIn, float rOut,
+                float startDeg, float sweepDeg) {
+            out.reset();
+            if (sweepDeg >= 359.5f) {
+                out.addCircle(cx, cy, rOut, Path.Direction.CW);
+                out.addCircle(cx, cy, rIn, Path.Direction.CCW);
+                return;
+            }
+            arcBounds.set(cx - rOut, cy - rOut, cx + rOut, cy + rOut);
+            innerArcBounds.set(cx - rIn, cy - rIn, cx + rIn, cy + rIn);
+            out.arcTo(arcBounds, startDeg, sweepDeg, true);
+            out.arcTo(innerArcBounds, startDeg + sweepDeg, -sweepDeg, false);
+            out.close();
+        }
+
+        private void drawGlassHalo(Canvas canvas, float middle, float hubRadius, float shadowRadius) {
+            float innerR = dp(60) * scale;
+            float outerR = outerRadius;
+            float trackThickness = Math.max(dp(24) * scale, outerR - innerR);
+            float midR = (innerR + outerR) * 0.5f;
+
+            // True translucent frosted glass: avoid opaque shadow fills behind the glass body.
+            if (buttons.length > 0) {
+                // Soft outer ambient edge drop without muddying the translucent interior.
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.BUTT);
+                paint.setStrokeWidth(dp(4.5f) * scale);
+                paint.setColor(withAlpha(0xff000000, colors.dark ? 45 : 22));
+                canvas.drawCircle(middle, middle, outerR + dp(1.8f) * scale, paint);
+
+                // Translucent frosted glass donut fill (~45% opacity so background shines through).
+                paint.setStrokeWidth(trackThickness);
+                paint.setColor(colors.dark ? 0x6c1b263d : 0x76ffffff);
+                canvas.drawCircle(middle, middle, midR, paint);
+
+                // Subtle top-to-bottom glass specular sheen for real liquid-glass depth.
+                Shader glassSheen = new android.graphics.LinearGradient(
+                        middle, middle - outerR, middle, middle + outerR,
+                        colors.dark ? new int[] {0x32ffffff, 0x06ffffff, 0x1c9cb8ff}
+                                : new int[] {0x60ffffff, 0x0cffffff, 0x30ffffff},
+                        new float[] {0f, 0.52f, 1f}, Shader.TileMode.CLAMP);
+                paint.setShader(glassSheen);
+                canvas.drawCircle(middle, middle, midR, paint);
+                paint.setShader(null);
+
+                // Strictly bounded translucent glass highlight slice on hover (zero overlap).
+                float step = 360f / buttons.length;
+                float padDeg = buttons.length <= 1 ? 0f : Math.min(3.0f, step * 0.08f);
+                float sliceIn = innerR + dp(3.5f) * scale;
+                float sliceOut = outerR - dp(3.5f) * scale;
+                float rimR = outerR - dp(1.5f) * scale;
+                for (int index = 0; index < buttons.length; index++) {
+                    float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                    if (selected <= 0.01f) continue;
+                    float sweep = Math.max(6f, step - padDeg * 2f);
+                    float startDeg = angles[index] - sweep * 0.5f;
+
+                    buildAnnularSlice(slicePath, middle, middle, sliceIn, sliceOut, startDeg, sweep);
+                    paint.setStyle(Paint.Style.FILL);
+                    int sliceTint = colors.dark ? 0xff7da2ff : 0xffffffff;
+                    paint.setColor(withAlpha(sliceTint, Math.round((colors.dark ? 92f : 148f) * selected)));
+                    canvas.drawPath(slicePath, paint);
+
+                    // Crisp outer rim accent indicator arc within the exact same slice.
+                    arcBounds.set(middle - rimR, middle - rimR, middle + rimR, middle + rimR);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setStrokeWidth(Math.max(2f, dp(2.4f) * scale));
+                    paint.setColor(withAlpha(colors.accent, Math.round(230 * selected)));
+                    canvas.drawArc(arcBounds, startDeg + 2.5f, Math.max(4f, sweep - 5f), false, paint);
+                }
+
+                // Luminous specular glass rims (bright inner bevel + delicate contrast outline).
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.BUTT);
+                paint.setStrokeWidth(Math.max(1.2f, dp(1.3f) * scale));
+                paint.setColor(colors.dark ? 0x52ffffff : 0xd8ffffff);
+                canvas.drawCircle(middle, middle, outerR - dp(0.8f) * scale, paint);
+                canvas.drawCircle(middle, middle, innerR + dp(0.8f) * scale, paint);
+                paint.setStrokeWidth(Math.max(1f, dp(0.9f) * scale));
+                paint.setColor(colors.dark ? 0x448ba2cc : 0x261b2440);
+                canvas.drawCircle(middle, middle, outerR + dp(0.3f) * scale, paint);
+                canvas.drawCircle(middle, middle, innerR - dp(0.3f) * scale, paint);
+            }
+
+            // Matching frosted translucent center hub (legible yet airy).
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(colors.dark ? 0x8c182238 : 0x9cffffff);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1.1f, dp(1.2f) * scale));
+            paint.setColor(colors.dark ? 0x58ffffff : 0xd8ffffff);
+            canvas.drawCircle(middle, middle, hubRadius - dp(0.7f) * scale, paint);
+            paint.setStrokeWidth(Math.max(1f, dp(0.9f) * scale));
+            paint.setColor(colors.dark ? 0x448ba2cc : 0x261b2440);
+            canvas.drawCircle(middle, middle, hubRadius + dp(0.3f) * scale, paint);
+        }
+
+        private void drawHexa(Canvas canvas, float middle, float shadowRadius) {
+            // Pass 1: soft shadows behind hex hub and hex cells.
+            shadowPaint.setStyle(Paint.Style.FILL);
+            shadowPaint.setColor(colors.core);
+            shadowPaint.setShadowLayer(shadowRadius, 0f, 0f, colors.ringShadow);
+            int shadowSave = canvas.save();
+            canvas.translate(middle, middle);
+            canvas.drawPath(hubHex, shadowPaint);
+            for (int index = 0; index < buttons.length; index++) {
+                float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                float dist = iconOrbit + segmentOffset(index);
+                int cellSave = canvas.save();
+                canvas.translate(directionX[index] * dist, directionY[index] * dist);
+                canvas.rotate(angles[index] + 90f);
+                float cellScale = 1f + 0.06f * selected;
+                canvas.scale(cellScale, cellScale);
+                canvas.drawPath(cellHex, shadowPaint);
+                canvas.restoreToCount(cellSave);
+            }
+            canvas.restoreToCount(shadowSave);
+
+            // Pass 2: crisp architectural hex fills + beveled borders.
+            int ringSave = canvas.save();
+            canvas.translate(middle, middle);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(colors.core);
+            canvas.drawPath(hubHex, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, dp(1.1f) * scale));
+            paint.setColor(colors.ringBorder);
+            canvas.drawPath(hubHex, paint);
+            // Subtle inner hex chamfer inside hub.
+            int innerSave = canvas.save();
+            canvas.scale(0.87f, 0.87f);
+            paint.setStrokeWidth(Math.max(1f, dp(0.75f) * scale));
+            paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 70 : 35));
+            canvas.drawPath(hubHex, paint);
+            canvas.restoreToCount(innerSave);
+
+            for (int index = 0; index < buttons.length; index++) {
+                float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                float dist = iconOrbit + segmentOffset(index);
+                int cellSave = canvas.save();
+                canvas.translate(directionX[index] * dist, directionY[index] * dist);
+                canvas.rotate(angles[index] + 90f);
+                float cellScale = 1f + 0.06f * selected;
+                canvas.scale(cellScale, cellScale);
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(buttons[index].isEnabled()
+                        ? blend(colors.petal, colors.petalSelected, selected) : colors.petalDisabled);
+                canvas.drawPath(cellHex, paint);
+
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(1f, dp(lerp(1.0f, 1.8f, selected)) * scale));
+                paint.setColor(selected > 0.01f
+                        ? blendArgb(colors.ringBorder, withAlpha(colors.accent, 230), selected)
+                        : colors.ringBorder);
+                canvas.drawPath(cellHex, paint);
+                canvas.restoreToCount(cellSave);
+            }
+            canvas.restoreToCount(ringSave);
+        }
+
+        private void drawDial(Canvas canvas, float middle, float hubRadius, float shadowRadius) {
+            float bezelOut = outerRadius + dp(2) * scale;
+            float bezelIn = outerRadius - dp(7) * scale;
+            float dialIn = hubRadius + dp(6) * scale;
+            float dialMid = (dialIn + bezelIn) * 0.5f;
+            float dialWidth = Math.max(dp(20) * scale, bezelIn - dialIn);
+
+            // Pass 1: cast one crisp unified shadow behind the full precision watch-dial disc.
+            shadowPaint.setStyle(Paint.Style.FILL);
+            shadowPaint.setColor(colors.core);
+            shadowPaint.setShadowLayer(shadowRadius, 0f, 0f, colors.ringShadow);
+            canvas.drawCircle(middle, middle, buttons.length > 0 ? bezelOut : hubRadius, shadowPaint);
+
+            if (buttons.length > 0) {
+                // Outer instrument bezel backing + main dial face.
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(colors.core);
+                canvas.drawCircle(middle, middle, bezelOut, paint);
+
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.BUTT);
+                paint.setStrokeWidth(dialWidth);
+                paint.setColor(colors.petal);
+                canvas.drawCircle(middle, middle, dialMid, paint);
+
+                // Clean bounded sector spotlight when hovered.
+                float step = 360f / buttons.length;
+                float halfStep = step * 0.5f;
+                for (int index = 0; index < buttons.length; index++) {
+                    float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                    if (selected <= 0.01f) continue;
+                    float startDeg = angles[index] - halfStep;
+                    buildAnnularSlice(slicePath, middle, middle,
+                            dialIn + dp(1) * scale, bezelIn - dp(1) * scale, startDeg, step);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(withAlpha(colors.petalSelected, Math.round(240 * selected)));
+                    canvas.drawPath(slicePath, paint);
+                }
+
+                // Thin radial sector hairlines separating items on the dial face.
+                if (buttons.length > 1) {
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(Math.max(1f, dp(0.85f) * scale));
+                    paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 115 : 65));
+                    for (int index = 0; index < buttons.length; index++) {
+                        double rad = Math.toRadians(angles[index] - halfStep);
+                        float cos = (float) Math.cos(rad);
+                        float sin = (float) Math.sin(rad);
+                        canvas.drawLine(middle + cos * (dialIn + dp(3) * scale),
+                                middle + sin * (dialIn + dp(3) * scale),
+                                middle + cos * (bezelIn - dp(2) * scale),
+                                middle + sin * (bezelIn - dp(2) * scale), paint);
+                    }
+                }
+
+                // 36 precision watch-bezel tick marks around the outer rim; hovered sector ticks glow accent.
+                int tickCount = 36;
+                float tickStep = 360f / tickCount;
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                for (int t = 0; t < tickCount; t++) {
+                    float deg = -90f + t * tickStep;
+                    float active = 0f;
+                    for (int index = 0; index < buttons.length; index++) {
+                        float sel = buttons[index].isEnabled() ? highlights[index] : 0f;
+                        if (sel <= 0.01f) continue;
+                        float diff = Math.abs(wrapDegrees(deg - angles[index]));
+                        if (diff <= halfStep - 1.5f) {
+                            active = Math.max(active, sel);
+                        }
+                    }
+                    boolean major = (t % 3 == 0);
+                    float len = dp(major ? 4.8f : 3.0f) * scale;
+                    float r1 = bezelOut - dp(2.0f) * scale;
+                    float r0 = r1 - len;
+                    double rad = Math.toRadians(deg);
+                    float cos = (float) Math.cos(rad);
+                    float sin = (float) Math.sin(rad);
+                    paint.setStrokeWidth(Math.max(1f, dp(major ? 1.5f : 0.95f) * scale));
+                    int restTick = withAlpha(colors.muted, colors.dark ? 145 : 115);
+                    paint.setColor(active > 0.01f
+                            ? blendArgb(restTick, withAlpha(colors.accent, 245), active)
+                            : restTick);
+                    canvas.drawLine(middle + cos * r0, middle + sin * r0,
+                            middle + cos * r1, middle + sin * r1, paint);
+                }
+
+                // Subtle bezel & inner track rings.
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.BUTT);
+                paint.setStrokeWidth(Math.max(1f, dp(1.0f) * scale));
+                paint.setColor(colors.ringBorder);
+                canvas.drawCircle(middle, middle, bezelOut, paint);
+                paint.setStrokeWidth(Math.max(1f, dp(0.8f) * scale));
+                paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 120 : 70));
+                canvas.drawCircle(middle, middle, bezelIn, paint);
+                canvas.drawCircle(middle, middle, dialIn, paint);
+            }
+
+            // Center watch-crown hub + precision triangular compass pointer toward hovered item.
+            for (int index = 0; index < buttons.length; index++) {
+                float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                if (selected <= 0.01f) continue;
+                int ptrSave = canvas.save();
+                canvas.translate(middle, middle);
+                canvas.rotate(angles[index] + 90f);
+                float tip = hubRadius + dp(7.5f) * scale * selected;
+                float base = hubRadius - dp(1.5f) * scale;
+                float halfW = dp(5.5f) * scale;
+                pointerPath.reset();
+                pointerPath.moveTo(0f, -tip);
+                pointerPath.lineTo(-halfW, -base);
+                pointerPath.lineTo(halfW, -base);
+                pointerPath.close();
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(withAlpha(colors.accent, Math.round(240 * selected)));
+                canvas.drawPath(pointerPath, paint);
+                canvas.restoreToCount(ptrSave);
+            }
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(colors.core);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, dp(1.1f) * scale));
+            paint.setColor(colors.ringBorder);
+            canvas.drawCircle(middle, middle, hubRadius, paint);
+            paint.setStrokeWidth(Math.max(1f, dp(0.75f) * scale));
+            paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 90 : 45));
+            canvas.drawCircle(middle, middle, hubRadius - dp(3.5f) * scale, paint);
+        }
+
+        private float wrapDegrees(float deg) {
+            float wrapped = deg % 360f;
+            if (wrapped > 180f) wrapped -= 360f;
+            if (wrapped < -180f) wrapped += 360f;
+            return wrapped;
+        }
+
+        private void drawMinimal(Canvas canvas, float middle, float hubRadius, float shadowRadius) {
+            float badgeR = cellRadius() * 0.80f;
+            float maxHoveredOuter = iconOrbit + highlightOffset * scale + badgeR + dp(2.0f) * scale;
+            float haloR = Math.min(middle - dp(5f) * scale, maxHoveredOuter + dp(6.5f) * scale);
+            float sleekHubR = hubRadius * 0.94f;
+
+            // Whisper-thin outer halo ring with clean breathing room outside every icon badge.
+            if (buttons.length > 0) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(1f, dp(1f) * scale));
+                paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 115 : 70));
+                canvas.drawCircle(middle, middle, haloR, paint);
+            }
+
+            // Soft hub shadow + translucent hub.
+            shadowPaint.setStyle(Paint.Style.FILL);
+            shadowPaint.setColor(withAlpha(colors.core, colors.dark ? 215 : 228));
+            shadowPaint.setShadowLayer(shadowRadius * 0.85f, 0f, 0f, colors.ringShadow);
+            canvas.drawCircle(middle, middle, sleekHubR, shadowPaint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(withAlpha(colors.core, colors.dark ? 218 : 230));
+            canvas.drawCircle(middle, middle, sleekHubR, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, dp(0.9f) * scale));
+            paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 130 : 80));
+            canvas.drawCircle(middle, middle, sleekHubR, paint);
+
+            // Airy translucent icon badges + crisp glowing outer indicator arc on hover.
+            float step = buttons.length > 0 ? 360f / buttons.length : 360f;
+            float arcSweep = Math.min(34f, Math.max(14f, step * 0.55f));
+            arcBounds.set(middle - haloR, middle - haloR, middle + haloR, middle + haloR);
+            for (int index = 0; index < buttons.length; index++) {
+                float selected = buttons[index].isEnabled() ? highlights[index] : 0f;
+                float dist = iconOrbit + segmentOffset(index);
+                float bx = middle + directionX[index] * dist;
+                float by = middle + directionY[index] * dist;
+                float r = badgeR + dp(2.0f) * scale * selected;
+
+                paint.setStyle(Paint.Style.FILL);
+                int restAlpha = colors.dark ? 165 : 180;
+                int activeAlpha = 242;
+                int fill = buttons[index].isEnabled()
+                        ? withAlpha(blend(colors.petal, colors.petalSelected, selected),
+                                Math.round(lerp(restAlpha, activeAlpha, selected)))
+                        : withAlpha(colors.petalDisabled, colors.dark ? 120 : 140);
+                paint.setColor(fill);
+                canvas.drawCircle(bx, by, r, paint);
+
+                if (selected > 0.01f) {
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(Math.max(1f, dp(1.5f) * scale));
+                    paint.setColor(withAlpha(colors.accent, Math.round(215 * selected)));
+                    canvas.drawCircle(bx, by, r, paint);
+
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setStrokeWidth(Math.max(2f, dp(2.8f) * scale));
+                    paint.setColor(withAlpha(colors.accent, Math.round(235 * selected)));
+                    canvas.drawArc(arcBounds, angles[index] - arcSweep * 0.5f, arcSweep, false, paint);
+                    paint.setStrokeCap(Paint.Cap.BUTT);
+                }
+            }
         }
     }
 
@@ -816,6 +1315,18 @@ final class RadialMenu extends FrameLayout {
     private int dp(float value) { return Ui.dp(getContext(), value); }
 
     private static float lerp(float from, float to, float t) { return from + (to - from) * t; }
+
+    private static int withAlpha(int color, int alpha) {
+        int clamped = Math.max(0, Math.min(255, alpha));
+        return (color & 0x00ffffff) | (clamped << 24);
+    }
+
+    private static int blendArgb(int from, int to, float t) {
+        return (Math.round(lerp((from >>> 24) & 255, (to >>> 24) & 255, t)) << 24)
+                | (Math.round(lerp((from >> 16) & 255, (to >> 16) & 255, t)) << 16)
+                | (Math.round(lerp((from >> 8) & 255, (to >> 8) & 255, t)) << 8)
+                | Math.round(lerp(from & 255, to & 255, t));
+    }
 
     private static int blend(int from, int to, float t) {
         return 0xff000000

@@ -136,7 +136,7 @@ public class MainActivity extends Activity {
         addSection(rightColumn, previewPanel, dualPane ? 0 : 16);
 
         exclusionsSection = Ui.column(this);
-        addSection(rightColumn, exclusionsSection, 18);
+        addSection(dualPane ? leftColumn : rightColumn, exclusionsSection, 18);
         permissionsSection = Ui.column(this);
         addSection(rightColumn, permissionsSection, 18);
 
@@ -255,15 +255,6 @@ public class MainActivity extends Activity {
         Switch autoStart = featureSwitch(R.string.auto_start_boot, RingConfig.isAutoStart(this));
         autoStart.setOnCheckedChangeListener((button, enabled) -> RingConfig.setAutoStart(this, enabled));
         addRow(pen, autoStart);
-        addRow(pen, choiceRow(R.string.ring_size, RingConfig.ringSize(this),
-                new int[] {R.string.size_small, R.string.size_normal, R.string.size_large},
-                new String[] {RingConfig.SIZE_SMALL, RingConfig.SIZE_NORMAL, RingConfig.SIZE_LARGE},
-                size -> {
-                    RingConfig.setRingSize(this, size);
-                    refreshPreview(shortcuts.selected());
-                }));
-        addRow(pen, dimSliderRow());
-        if (Build.VERSION.SDK_INT >= 31) addRow(pen, blurSliderRow());
         LinearLayout windowSizeGroup = Ui.column(this);
         View windowDivider = new View(this);
         windowDivider.setBackgroundColor(colors.border);
@@ -411,12 +402,13 @@ public class MainActivity extends Activity {
                 buttons[i].setSelected(selected);
             }
         };
+        boolean scrollable = optionValues.length > 3;
         for (int i = 0; i < optionValues.length; i++) {
             String value = optionValues[i];
             TextView button = Ui.text(this, getString(optionLabels[i]), 13, colors.text, true);
             button.setGravity(Gravity.CENTER);
             button.setMinHeight(dp(42));
-            button.setPadding(dp(8), dp(6), dp(8), dp(6));
+            button.setPadding(dp(scrollable ? 14 : 8), dp(6), dp(scrollable ? 14 : 8), dp(6));
             button.setSingleLine(true);
             button.setFocusable(true);
             button.setOnClickListener(view -> {
@@ -425,13 +417,23 @@ public class MainActivity extends Activity {
                 update[0].run();
                 onSelected.accept(value);
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
+            LinearLayout.LayoutParams params = scrollable
+                    ? new LinearLayout.LayoutParams(-2, -2, 1)
+                    : new LinearLayout.LayoutParams(0, -2, 1);
             if (i > 0) params.setMarginStart(dp(6));
             group.addView(button, params);
             buttons[i] = button;
         }
         update[0].run();
-        row.addView(group, groupParams);
+        if (scrollable) {
+            android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
+            scroller.setHorizontalScrollBarEnabled(false);
+            scroller.setFillViewport(true);
+            scroller.addView(group, new FrameLayout.LayoutParams(-2, -2));
+            row.addView(scroller, groupParams);
+        } else {
+            row.addView(group, groupParams);
+        }
         return row;
     }
 
@@ -919,6 +921,28 @@ public class MainActivity extends Activity {
         stage.topMargin = dp(10);
         previewPanel.addView(previewScene, stage);
         refreshPreview(shortcuts.selected());
+
+        addSection(previewPanel, Ui.text(this, getString(R.string.ring_appearance), 16, colors.text, true), 18);
+        LinearLayout appearance = card();
+        addRow(appearance, choiceRow(R.string.ring_style, RingConfig.ringStyle(this),
+                new int[] {R.string.style_petals, R.string.style_orbit, R.string.style_halo,
+                        R.string.style_hexa, R.string.style_dial, R.string.style_minimal},
+                new String[] {RingConfig.STYLE_PETALS, RingConfig.STYLE_ORBIT, RingConfig.STYLE_HALO,
+                        RingConfig.STYLE_HEXA, RingConfig.STYLE_DIAL, RingConfig.STYLE_MINIMAL},
+                style -> {
+                    RingConfig.setRingStyle(this, style);
+                    refreshPreview(shortcuts.selected());
+                }));
+        addRow(appearance, choiceRow(R.string.ring_size, RingConfig.ringSize(this),
+                new int[] {R.string.size_small, R.string.size_normal, R.string.size_large},
+                new String[] {RingConfig.SIZE_SMALL, RingConfig.SIZE_NORMAL, RingConfig.SIZE_LARGE},
+                size -> {
+                    RingConfig.setRingSize(this, size);
+                    refreshPreview(shortcuts.selected());
+                }));
+        addRow(appearance, dimSliderRow());
+        if (Build.VERSION.SDK_INT >= 31) addRow(appearance, blurSliderRow());
+        addSection(previewPanel, appearance, 8);
     }
 
     private void refreshPreview(List<Shortcuts.Entry> selected) {
@@ -996,7 +1020,8 @@ public class MainActivity extends Activity {
     }
 
     private void pickApp() {
-        pickApp(getString(R.string.add_ring_app), shortcuts::available, shortcuts::add, true);
+        pickApp(getString(R.string.add_ring_app),
+                () -> shortcuts.availableExcept(java.util.Collections.emptySet()), shortcuts::add, true);
     }
 
     private void pickApp(String title, Supplier<List<Shortcuts.Entry>> loadAvailable, Predicate<Shortcuts.Entry> addApp,
@@ -1007,7 +1032,12 @@ public class MainActivity extends Activity {
         int padding = dp(16);
         panel.setPadding(padding, padding, padding, padding);
         panel.setBackground(Ui.shape(this, colors.background, 18));
-        panel.addView(Ui.text(this, title, 20, colors.text, true));
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.addView(Ui.text(this, title, 20, colors.text, true), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView countLabel = ringPicker ? Ui.text(this, "", 13, colors.muted, true) : null;
+        if (countLabel != null) titleRow.addView(countLabel);
+        panel.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
 
         EditText search = new EditText(this);
         search.setSingleLine(true);
@@ -1016,10 +1046,35 @@ public class MainActivity extends Activity {
         search.setTextColor(colors.text);
         panel.addView(search, new LinearLayout.LayoutParams(-1, dp(52)));
 
+        TextView limitHint = ringPicker ? Ui.text(this, getString(R.string.ring_item_limit, Shortcuts.LIMIT),
+                12, colors.accent, false) : null;
+        if (limitHint != null) {
+            limitHint.setPadding(dp(4), 0, dp(4), dp(6));
+            limitHint.setVisibility(View.GONE);
+            panel.addView(limitHint, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        java.util.Set<String> chosenIds = new java.util.HashSet<>();
         ArrayAdapter<Shortcuts.Entry> adapter = new ArrayAdapter<Shortcuts.Entry>(this, 0) {
             @Override public View getView(int position, View recycled, ViewGroup parent) {
                 Shortcuts.Entry item = getItem(position);
-                LinearLayout row = recycled instanceof LinearLayout ? (LinearLayout) recycled : appRow(item);
+                LinearLayout row;
+                CheckBox toggle = null;
+                if (recycled instanceof LinearLayout) {
+                    row = (LinearLayout) recycled;
+                    if (ringPicker && row.getChildCount() > 2 && row.getChildAt(2) instanceof CheckBox) {
+                        toggle = (CheckBox) row.getChildAt(2);
+                    }
+                } else {
+                    row = appRow(item);
+                    if (ringPicker) {
+                        toggle = new CheckBox(MainActivity.this);
+                        toggle.setClickable(false);
+                        toggle.setFocusable(false);
+                        toggle.setFocusableInTouchMode(false);
+                        row.addView(toggle, new LinearLayout.LayoutParams(-2, -2));
+                    }
+                }
                 ImageView iconView = (ImageView) row.getChildAt(0);
                 TextView labelView = (TextView) row.getChildAt(1);
                 labelView.setText(item.label);
@@ -1036,6 +1091,13 @@ public class MainActivity extends Activity {
                             }
                         });
                     });
+                }
+                if (ringPicker && toggle != null) {
+                    boolean checked = chosenIds.contains(item.id);
+                    boolean enabled = checked || chosenIds.size() < Shortcuts.LIMIT;
+                    toggle.setChecked(checked);
+                    toggle.setEnabled(enabled);
+                    row.setAlpha(enabled ? 1f : 0.45f);
                 }
                 return row;
             }
@@ -1062,10 +1124,21 @@ public class MainActivity extends Activity {
         boolean[] loading = {true};
         Runnable refreshResults = () -> {
             String term = search.getText().toString().trim().toLowerCase(Locale.ROOT);
-            boolean full = ringPicker && shortcuts.selected().size() >= Shortcuts.LIMIT;
+            chosenIds.clear();
+            if (ringPicker) {
+                for (Shortcuts.Entry entry : shortcuts.selected()) chosenIds.add(entry.id);
+            }
+            boolean full = ringPicker && chosenIds.size() >= Shortcuts.LIMIT;
+            if (countLabel != null) {
+                countLabel.setText(getString(R.string.ring_item_count, chosenIds.size(), Shortcuts.LIMIT));
+                countLabel.setTextColor(full ? colors.accent : colors.muted);
+            }
+            if (limitHint != null) {
+                limitHint.setVisibility(full ? View.VISIBLE : View.GONE);
+            }
             adapter.setNotifyOnChange(false);
             adapter.clear();
-            if (!full && !loading[0]) {
+            if (!loading[0]) {
                 for (Shortcuts.Entry app : available) {
                     if (app.label.toLowerCase(Locale.ROOT).contains(term)
                             || app.id.toLowerCase(Locale.ROOT).contains(term)) {
@@ -1074,9 +1147,13 @@ public class MainActivity extends Activity {
                 }
             }
             if (ringPicker) {
-                for (CheckBox choice : toolOptions) choice.setEnabled(choice.isChecked() || !full);
-                appStatus.setText(full ? getString(R.string.ring_item_limit, Shortcuts.LIMIT)
-                        : !loading[0] && adapter.isEmpty() ? getString(R.string.no_apps) : "");
+                for (CheckBox choice : toolOptions) {
+                    Shortcuts.Entry tag = (Shortcuts.Entry) choice.getTag();
+                    boolean checked = tag != null && chosenIds.contains(tag.id);
+                    choice.setChecked(checked);
+                    choice.setEnabled(checked || !full);
+                }
+                appStatus.setText(!loading[0] && adapter.isEmpty() ? getString(R.string.no_apps) : "");
                 appStatus.setVisibility(appStatus.length() > 0 ? View.VISIBLE : View.GONE);
             } else {
                 appStatus.setText(loading[0] ? "" : getString(R.string.no_apps));
@@ -1099,12 +1176,17 @@ public class MainActivity extends Activity {
             Object row = parent.getItemAtPosition(position);
             if (!(row instanceof Shortcuts.Entry)) return;
             Shortcuts.Entry choice = (Shortcuts.Entry) row;
-            if (!addApp.test(choice)) return;
-            render();
             if (ringPicker) {
-                available.remove(choice);
+                if (chosenIds.contains(choice.id)) {
+                    shortcuts.remove(choice.id);
+                } else if (!addApp.test(choice)) {
+                    return;
+                }
+                render();
                 refreshResults.run();
             } else {
+                if (!addApp.test(choice)) return;
+                render();
                 dialog.dismiss();
             }
         });
@@ -1132,10 +1214,18 @@ public class MainActivity extends Activity {
         dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         dialog.show();
+        int screenW = getResources().getDisplayMetrics().widthPixels;
         int height = getResources().getDisplayMetrics().heightPixels;
-        dialog.getWindow().setLayout(Math.min(Ui.dp(this, 480),
-                getResources().getDisplayMetrics().widthPixels - padding * 2),
-                Math.min(Ui.dp(this, 560), height * 4 / 5));
+        int dialogW = Math.min(Ui.dp(this, 480), screenW - padding * 2);
+        int dialogH = Math.min(Ui.dp(this, 560), height * 4 / 5);
+        dialog.getWindow().setLayout(dialogW, dialogH);
+        if (dualPane && ringPicker) {
+            android.view.WindowManager.LayoutParams lp = dialog.getWindow().getAttributes();
+            lp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+            lp.x = Math.max(dp(36), (screenW / 2 - dialogW) / 2);
+            lp.dimAmount = 0.25f;
+            dialog.getWindow().setAttributes(lp);
+        }
     }
 
     private LinearLayout toolChoices(List<CheckBox> toolOptions) {

@@ -141,6 +141,14 @@
     <string name="recents_locked">ล็อกแล้ว</string>
     <string name="recents_swipe_down">ปัดการ์ด PenDock ลงเพื่อล็อกไว้</string>
     <string name="auto_start_boot">เปิดวงเมนูอัตโนมัติหลังรีสตาร์ท</string>
+    <string name="ring_appearance">รูปลักษณ์วงเมนู</string>
+    <string name="ring_style">รูปแบบวงเมนู</string>
+    <string name="style_petals">กลีบดอก</string>
+    <string name="style_orbit">วงโคจร</string>
+    <string name="style_halo">กระจก</string>
+    <string name="style_hexa">หกเหลี่ยม</string>
+    <string name="style_dial">หน้าปัด</string>
+    <string name="style_minimal">มินิมอล</string>
     <string name="ring_size">ขนาดวงเมนู</string>
     <string name="size_small">เล็ก</string>
     <string name="size_normal">ปกติ</string>
