@@ -12,8 +12,8 @@ if [[ ! -x "$build_tools/aapt2" || ! -f "$android_jar" ]]; then
     exit 1
 fi
 
-version_code="${PENDOCK_VERSION_CODE:-51}"
-version_name="${PENDOCK_VERSION_NAME:-1.1.0}"
+version_code="${PENDOCK_VERSION_CODE:-60}"
+version_name="${PENDOCK_VERSION_NAME:-2.0.0}"
 
 rm -rf build/generated build/classes build/dex
 mkdir -p build/generated build/classes build/dex
