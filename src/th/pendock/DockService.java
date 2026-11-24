@@ -588,7 +588,7 @@ public class DockService extends Service {
             main.postDelayed(() -> {
                 if (request != splitRequest || !running || menu != null
                         || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
-                CircleCaptureService.capture(frame -> {
+                CircleCaptureService.captureOrRecent(frame -> {
                     if (frame == null || request != splitRequest || !running || menu != null
                             || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
                         if (frame != null) frame.recycle();
@@ -1020,9 +1020,34 @@ public class DockService extends Service {
             detach();
             return;
         }
-        Bundle options = floatingOptions();
+        Bundle options = floatingOptions(false);
         detach();
-        if (options == null || !SystemScreenshot.switchToHome(selection.activity, () -> {
+        if (options == null) {
+            Toast.makeText(this, Appearance.text(this, R.string.float_failed), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int request = ++splitRequest;
+        if (Build.VERSION.SDK_INT >= 30 && CircleCaptureService.isReady() && Settings.canDrawOverlays(this)) {
+            main.postDelayed(() -> {
+                if (request != splitRequest || !running || menu != null
+                        || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+                CircleCaptureService.captureOrRecent(frame -> {
+                    if (frame == null || request != splitRequest || !running || menu != null
+                            || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                        if (frame != null) frame.recycle();
+                        runFloatLaunch(requested, selection, options);
+                        return;
+                    }
+                    runFloatEnterTransition(request, frame, requested, selection);
+                });
+            }, 32);
+            return;
+        }
+        runFloatLaunch(requested, selection, options);
+    }
+
+    private void runFloatLaunch(Intent requested, WindowModeMonitor.FocusedApp selection, Bundle options) {
+        if (!SystemScreenshot.switchToHome(selection.activity, () -> {
             if (running && !getSystemService(KeyguardManager.class).isKeyguardLocked()) {
                 launch(requested, options, false);
             }
@@ -1031,15 +1056,201 @@ public class DockService extends Service {
         }
     }
 
+    private void runFloatEnterTransition(int request, Bitmap frame, Intent requested,
+            WindowModeMonitor.FocusedApp selection) {
+        Rect display = displayBounds();
+        int screenW = Math.max(1, display.width());
+        int screenH = Math.max(1, display.height());
+        Rect start = selection.bounds != null && !selection.bounds.isEmpty()
+                ? new Rect(selection.bounds) : new Rect(0, 0, screenW, screenH);
+        if (!start.intersect(0, 0, screenW, screenH) || start.width() < 20 || start.height() < 20) {
+            start.set(0, 0, screenW, screenH);
+        }
+
+        int fw = frame.getWidth();
+        int fh = frame.getHeight();
+        int cropL = Math.max(0, Math.min(fw - 1, Math.round(start.left * (fw / (float) screenW))));
+        int cropT = Math.max(0, Math.min(fh - 1, Math.round(start.top * (fh / (float) screenH))));
+        int cropR = Math.max(cropL + 1, Math.min(fw, Math.round(start.right * (fw / (float) screenW))));
+        int cropB = Math.max(cropT + 1, Math.min(fh, Math.round(start.bottom * (fh / (float) screenH))));
+        Bitmap appBmp;
+        try {
+            if (cropL == 0 && cropT == 0 && cropR == fw && cropB == fh) {
+                appBmp = frame;
+            } else {
+                appBmp = Bitmap.createBitmap(frame, cropL, cropT, cropR - cropL, cropB - cropT);
+                if (appBmp != frame) frame.recycle();
+            }
+        } catch (RuntimeException failure) {
+            frame.recycle();
+            runFloatLaunch(requested, selection, floatingOptions(false));
+            return;
+        }
+
+        String targetPkg = selection.activity == null ? null : selection.activity.getPackageName();
+        float maxRadius = Ui.dp(this, 20);
+        int startW = start.width();
+        int startH = start.height();
+        int[] clipRect = {0, 0, startW, startH};
+        float[] cornerRadius = {0f};
+
+        FrameLayout curtain = new FrameLayout(this);
+        FrameLayout card = new FrameLayout(this);
+        card.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View view, android.graphics.Outline outline) {
+                outline.setRoundRect(clipRect[0], clipRect[1], clipRect[2], clipRect[3], cornerRadius[0]);
+            }
+        });
+        card.setClipToOutline(true);
+        card.setPivotX(0f);
+        card.setPivotY(0f);
+
+        android.widget.ImageView appView = new android.widget.ImageView(this);
+        appView.setImageBitmap(appBmp);
+        appView.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+        card.addView(appView, new FrameLayout.LayoutParams(-1, -1));
+
+        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
+                startW, startH, Gravity.TOP | Gravity.LEFT);
+        cardParams.leftMargin = start.left;
+        cardParams.topMargin = start.top;
+        curtain.addView(card, cardParams);
+
+        WindowManager.LayoutParams curtainParams = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        curtainParams.setTitle("PenDock float transition");
+        curtainParams.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= 30) {
+            curtainParams.setFitInsetsTypes(0);
+            curtainParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+
+        boolean[] cleaned = {false};
+        splitTransitioning = true;
+        Runnable cleanup = () -> {
+            if (cleaned[0]) return;
+            cleaned[0] = true;
+            splitTransitioning = false;
+            appView.setImageDrawable(null);
+            removeOverlay(curtain);
+            appBmp.recycle();
+        };
+        try {
+            manager.addView(curtain, curtainParams);
+        } catch (RuntimeException unavailable) {
+            cleanup.run();
+            runFloatLaunch(requested, selection, floatingOptions(false));
+            return;
+        }
+        main.postDelayed(cleanup, 1800);
+
+        // Wait ~50ms after addView so the curtain's first frame is composited before switching to Home.
+        main.postDelayed(() -> {
+            if (cleaned[0] || request != splitRequest || !running
+                    || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                cleanup.run();
+                return;
+            }
+            Intent noAnim = new Intent(requested).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            Bundle options = floatingOptions(true);
+            if (options == null || !SystemScreenshot.switchToHome(selection.activity, () -> {
+                if (cleaned[0] || request != splitRequest || !running
+                        || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                    cleanup.run();
+                    return;
+                }
+                launch(noAnim, options, false);
+                // Wait 180ms so HarmonyOS creates and positions the freeform task behind the
+                // full-screen card, then read its task bounds and shrink directly onto the visible rect.
+                main.postDelayed(() -> {
+                    if (cleaned[0] || !running) {
+                        cleanup.run();
+                        return;
+                    }
+                    Rect liveTarget = WindowModeMonitor.floatingWindowBounds(targetPkg);
+                    Rect target = liveTarget != null && !liveTarget.isEmpty()
+                            ? new Rect(liveTarget) : floatingBounds();
+                    if ("HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)) {
+                        // HarmonyOS reports unscaled task bounds in AccessibilityWindowInfo, while
+                        // SurfaceFlinger renders hwMultiwindow-freeform at ~0.816 scale from top-left.
+                        target.right = target.left + Math.round(target.width() * 0.816f);
+                        target.bottom = target.top + Math.round(target.height() * 0.816f);
+                    }
+                    int targetW = Math.max(1, target.width());
+                    int targetH = Math.max(1, target.height());
+
+                    android.animation.ValueAnimator shrink = android.animation.ValueAnimator.ofFloat(0f, 1f);
+                    shrink.setDuration(300);
+                    shrink.setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f));
+                    shrink.addUpdateListener(anim -> {
+                        if (cleaned[0]) return;
+                        float t = (float) anim.getAnimatedValue();
+                        float curL = start.left + (target.left - start.left) * t;
+                        float curT = start.top + (target.top - start.top) * t;
+                        float curW = startW + (targetW - startW) * t;
+                        float curH = startH + (targetH - startH) * t;
+                        float scale = Math.max(curW / startW, curH / startH);
+                        float visW = Math.min(startW, curW / scale);
+                        float visH = Math.min(startH, curH / scale);
+                        int cL = Math.max(0, Math.round((startW - visW) * 0.5f));
+                        int cT = 0;
+                        int cR = Math.min(startW, cL + Math.max(1, Math.round(visW)));
+                        int cB = Math.min(startH, cT + Math.max(1, Math.round(visH)));
+                        clipRect[0] = cL;
+                        clipRect[1] = cT;
+                        clipRect[2] = cR;
+                        clipRect[3] = cB;
+                        cornerRadius[0] = maxRadius * t / Math.max(0.2f, scale);
+                        card.setScaleX(scale);
+                        card.setScaleY(scale);
+                        card.setTranslationX(curL - start.left - cL * scale);
+                        card.setTranslationY(curT - start.top - cT * scale);
+                        card.invalidateOutline();
+                    });
+                    shrink.addListener(new android.animation.AnimatorListenerAdapter() {
+                        @Override public void onAnimationEnd(android.animation.Animator animation) {
+                            if (cleaned[0]) return;
+                            card.animate()
+                                    .alpha(0f)
+                                    .setDuration(100)
+                                    .withEndAction(cleanup)
+                                    .start();
+                        }
+                    });
+                    shrink.start();
+                }, 180);
+            })) {
+                cleanup.run();
+                Toast.makeText(this, Appearance.text(this, R.string.float_failed), Toast.LENGTH_SHORT).show();
+            }
+        }, 50);
+    }
+
+    private Rect floatingBounds() {
+        Rect bounds = displayBounds();
+        int width = RingConfig.floatingWidth(this, bounds.width());
+        int height = RingConfig.floatingHeight(this, bounds.height());
+        int x = bounds.centerX() - width / 2;
+        int y = bounds.centerY() - height / 2;
+        return new Rect(x, y, x + width, y + height);
+    }
+
     private Bundle floatingOptions() {
+        return floatingOptions(false);
+    }
+
+    private Bundle floatingOptions(boolean noAnim) {
         Bundle options = null;
         if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT)) {
-            Rect bounds = displayBounds();
-            int width = RingConfig.floatingWidth(this, bounds.width());
-            int height = RingConfig.floatingHeight(this, bounds.height());
-            int x = bounds.centerX() - width / 2;
-            int y = bounds.centerY() - height / 2;
-            options = ActivityOptions.makeBasic().setLaunchBounds(new Rect(x, y, x + width, y + height)).toBundle();
+            Rect rect = floatingBounds();
+            ActivityOptions base = noAnim
+                    ? ActivityOptions.makeCustomAnimation(this, 0, 0)
+                    : ActivityOptions.makeBasic();
+            options = base.setLaunchBounds(rect).toBundle();
             // Huawei's Android-based tablets use their own freeform task mode.
             boolean huawei = "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER);
             options.putInt("android.activity.windowingMode", huawei ? 102 : 5);

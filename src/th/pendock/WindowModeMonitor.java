@@ -86,6 +86,38 @@ public class WindowModeMonitor extends AccessibilityService {
         return connected == null || !connected.tracking ? new HashSet<>() : connected.readFloatingPackages();
     }
 
+    static Rect floatingWindowBounds(String packageName) {
+        return connected == null || !connected.tracking
+                ? null : connected.readFloatingWindowBounds(packageName);
+    }
+
+    private Rect readFloatingWindowBounds(String packageName) {
+        List<AccessibilityWindowInfo> windows = getWindows();
+        try {
+            Rect display = usableDisplay();
+            Rect focusedFallback = null;
+            for (AccessibilityWindowInfo window : windows) {
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION
+                        || window.isInPictureInPictureMode()) continue;
+                Rect bounds = new Rect();
+                window.getBoundsInScreen(bounds);
+                if (bounds.isEmpty()) continue;
+                boolean spansWidth = spansAxis(bounds.left, bounds.right, display.left, display.right);
+                boolean spansHeight = spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
+                if (spansWidth || spansHeight) continue;
+                App app = activities.get(window.getId());
+                if (packageName != null && app != null && app.activity != null
+                        && packageName.equals(app.activity.getPackageName())) {
+                    return bounds;
+                }
+                if (window.isFocused()) focusedFallback = bounds;
+            }
+            return focusedFallback;
+        } finally {
+            for (AccessibilityWindowInfo window : windows) window.recycle();
+        }
+    }
+
     private Set<String> readFloatingPackages() {
         Set<String> result = new HashSet<>();
         List<AccessibilityWindowInfo> windows = getWindows();
@@ -139,7 +171,7 @@ public class WindowModeMonitor extends AccessibilityService {
                 boolean split = !windowed && (spansWidth != spansHeight)
                         && isDockedSplit(bounds, display, spansWidth);
                 App app = activities.get(window.getId());
-                return new FocusedApp(app, windowed, split);
+                return new FocusedApp(app, windowed, split, bounds);
             }
             return null;
         } finally {
@@ -171,12 +203,14 @@ public class WindowModeMonitor extends AccessibilityService {
         final Intent floatingIntent;
         final boolean alreadyWindowed;
         final boolean alreadySplit;
+        final Rect bounds;
 
-        FocusedApp(App app, boolean windowed, boolean split) {
+        FocusedApp(App app, boolean windowed, boolean split, Rect bounds) {
             activity = app == null ? null : app.activity;
             floatingIntent = app == null || app.floatingIntent == null ? null : new Intent(app.floatingIntent);
             alreadyWindowed = windowed;
             alreadySplit = split;
+            this.bounds = bounds == null ? null : new Rect(bounds);
         }
     }
 
