@@ -182,6 +182,7 @@ final class ScreenOcrEngine {
                 results.add(line);
             }
         }
+        results = mergeHorizontalLines(results);
         sortReadingOrder(results);
         return results;
     }
@@ -577,9 +578,139 @@ final class ScreenOcrEngine {
                 || (c >= 0x3400 && c <= 0x4dbf) || (c >= 0xac00 && c <= 0xd7af);
     }
 
-    private static void sortReadingOrder(List<TextLine> lines) {
-        lines.sort(Comparator.comparingInt((TextLine l) -> l.bounds.top / 20)
+    /**
+     * Merges horizontally adjacent OCR fragments that belong to the same visual text line
+     * (e.g. large headlines where DBNet detects individual words as separate boxes).
+     */
+    private static List<TextLine> mergeHorizontalLines(List<TextLine> lines) {
+        if (lines == null || lines.size() <= 1) return lines;
+        List<TextLine> byY = new ArrayList<>(lines);
+        byY.sort(Comparator.comparingInt((TextLine l) -> l.bounds.centerY())
                 .thenComparingInt(l -> l.bounds.left));
+
+        // 1. Cluster fragments into horizontal visual rows using vertical overlap.
+        List<List<TextLine>> rows = new ArrayList<>();
+        List<Rect> rowBounds = new ArrayList<>();
+        for (TextLine line : byY) {
+            int bestRow = -1;
+            int bestOverlap = 0;
+            int h = Math.max(1, line.bounds.height());
+            for (int i = 0; i < rows.size(); i++) {
+                Rect rb = rowBounds.get(i);
+                int rh = Math.max(1, rb.height());
+                float heightRatio = Math.max(h, rh) / (float) Math.min(h, rh);
+                if (heightRatio > 1.8f) continue;
+                int ov = Math.min(rb.bottom, line.bounds.bottom) - Math.max(rb.top, line.bounds.top);
+                int minH = Math.min(h, rh);
+                if (ov >= minH * 0.45f && ov > bestOverlap) {
+                    bestOverlap = ov;
+                    bestRow = i;
+                }
+            }
+            if (bestRow >= 0) {
+                rows.get(bestRow).add(line);
+                rowBounds.get(bestRow).union(line.bounds);
+            } else {
+                List<TextLine> fresh = new ArrayList<>();
+                fresh.add(line);
+                rows.add(fresh);
+                rowBounds.add(new Rect(line.bounds));
+            }
+        }
+
+        // 2. Within each row, sort left-to-right and stitch nearby fragments into full lines.
+        List<TextLine> merged = new ArrayList<>(lines.size());
+        for (List<TextLine> row : rows) {
+            row.sort(Comparator.comparingInt(l -> l.bounds.left));
+            TextLine acc = row.get(0);
+            for (int i = 1; i < row.size(); i++) {
+                TextLine next = row.get(i);
+                int refH = Math.max(1, Math.max(acc.bounds.height(), next.bounds.height()));
+                int gap = next.bounds.left - acc.bounds.right;
+                int vOv = Math.min(acc.bounds.bottom, next.bounds.bottom)
+                        - Math.max(acc.bounds.top, next.bounds.top);
+                int minH = Math.max(1, Math.min(acc.bounds.height(), next.bounds.height()));
+                if (gap <= refH * 1.6f && vOv >= minH * 0.35f) {
+                    acc = combineHorizontal(acc, next);
+                } else {
+                    merged.add(acc);
+                    acc = next;
+                }
+            }
+            merged.add(acc);
+        }
+        return merged;
+    }
+
+    private static TextLine combineHorizontal(TextLine left, TextLine right) {
+        Rect union = new Rect(left.bounds);
+        union.union(right.bounds);
+        String lt = left.text == null ? "" : left.text.trim();
+        String rt = right.text == null ? "" : right.text.trim();
+        String combinedText;
+        if (lt.isEmpty()) {
+            combinedText = rt;
+        } else if (rt.isEmpty()) {
+            combinedText = lt;
+        } else {
+            char prevEnd = lt.charAt(lt.length() - 1);
+            char nextStart = rt.charAt(0);
+            combinedText = (!isCjk(prevEnd) && !isCjk(nextStart)) ? (lt + " " + rt) : (lt + rt);
+        }
+        List<WordSpan> words = new ArrayList<>(left.words.size() + right.words.size() + 2);
+        if (left.words.isEmpty() && !lt.isEmpty()) {
+            words.add(new WordSpan(left.bounds, lt));
+        } else {
+            words.addAll(left.words);
+        }
+        if (right.words.isEmpty() && !rt.isEmpty()) {
+            words.add(new WordSpan(right.bounds, rt));
+        } else {
+            words.addAll(right.words);
+        }
+        float conf = (left.confidence + right.confidence) * 0.5f;
+        return new TextLine(union, combinedText, conf, words);
+    }
+
+    private static void sortReadingOrder(List<TextLine> lines) {
+        if (lines == null || lines.size() <= 1) return;
+        // Group into visual rows first so ordering is strictly transitive regardless of font size.
+        List<TextLine> byTop = new ArrayList<>(lines);
+        byTop.sort(Comparator.comparingInt((TextLine l) -> l.bounds.top)
+                .thenComparingInt(l -> l.bounds.left));
+        List<List<TextLine>> rows = new ArrayList<>();
+        List<Integer> rowTop = new ArrayList<>();
+        List<Integer> rowBottom = new ArrayList<>();
+        for (TextLine line : byTop) {
+            int placed = -1;
+            int h = Math.max(1, line.bounds.height());
+            for (int i = 0; i < rows.size(); i++) {
+                int rTop = rowTop.get(i);
+                int rBot = rowBottom.get(i);
+                int ov = Math.min(rBot, line.bounds.bottom) - Math.max(rTop, line.bounds.top);
+                int minH = Math.max(1, Math.min(h, rBot - rTop));
+                if (ov >= minH * 0.5f) {
+                    placed = i;
+                    break;
+                }
+            }
+            if (placed >= 0) {
+                rows.get(placed).add(line);
+                rowTop.set(placed, Math.min(rowTop.get(placed), line.bounds.top));
+                rowBottom.set(placed, Math.max(rowBottom.get(placed), line.bounds.bottom));
+            } else {
+                List<TextLine> fresh = new ArrayList<>();
+                fresh.add(line);
+                rows.add(fresh);
+                rowTop.add(line.bounds.top);
+                rowBottom.add(line.bounds.bottom);
+            }
+        }
+        lines.clear();
+        for (List<TextLine> row : rows) {
+            row.sort(Comparator.comparingInt(l -> l.bounds.left));
+            lines.addAll(row);
+        }
     }
 
     private static Rect clampRect(Rect r, int w, int h) {
