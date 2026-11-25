@@ -20,7 +20,8 @@
         </intent>
     </queries>
     <application android:name=".PenDockApplication" android:label="PenDock" android:theme="@style/AppTheme"
-        android:icon="@drawable/ic_launcher_ring" android:roundIcon="@drawable/ic_launcher_ring" android:allowBackup="false">
+        android:icon="@drawable/ic_launcher_ring" android:roundIcon="@drawable/ic_launcher_ring"
+        android:allowBackup="false" android:extractNativeLibs="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

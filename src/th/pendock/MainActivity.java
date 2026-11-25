@@ -1097,7 +1097,8 @@ public class MainActivity extends Activity {
                 new String[] {RingConfig.THEME_APP, RingConfig.THEME_LIGHT, RingConfig.THEME_DARK},
                 theme -> {
                     RingConfig.setRingTheme(this, theme);
-                    refreshPreview(shortcuts.selected());
+                    if (previewMenu != null) previewMenu.reloadColors();
+                    else refreshPreview(shortcuts.selected());
                 }));
         addRow(appearance, ringColorRow());
         addRow(appearance, choiceRow(R.string.ring_size, RingConfig.ringSize(this),
@@ -1113,12 +1114,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout ringColorRow() {
-        int[] labels = {
-                R.string.color_default, R.string.color_ocean, R.string.color_teal, R.string.color_violet,
-                R.string.color_rose, R.string.color_amber, R.string.color_coral, R.string.color_graphite
-        };
-        String[] values = RingConfig.COLOR_VALUES;
-        String[] active = {RingConfig.ringColor(this)};
+        int[] currentHue = {RingConfig.ringHue(this)};
 
         LinearLayout row = Ui.column(this);
         row.setPadding(0, dp(10), 0, dp(12));
@@ -1126,62 +1122,144 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.addView(Ui.text(this, getString(R.string.ring_color), 14, colors.text, false),
                 new LinearLayout.LayoutParams(0, -2, 1));
-        TextView activeLabel = Ui.text(this, "", 13, colors.accent, true);
-        header.addView(activeLabel);
+
+        View previewDot = new View(this);
+        LinearLayout.LayoutParams dotP = new LinearLayout.LayoutParams(dp(18), dp(18));
+        dotP.setMarginEnd(dp(8));
+        header.addView(previewDot, dotP);
+
+        TextView defaultBtn = Ui.text(this, getString(R.string.color_default), 12, colors.accent, true);
+        defaultBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+        defaultBtn.setFocusable(true);
+        header.addView(defaultBtn, new LinearLayout.LayoutParams(-2, -2));
         row.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
-        LinearLayout swatches = new LinearLayout(this);
-        swatches.setGravity(Gravity.CENTER_VERTICAL);
-        swatches.setPadding(dp(2), dp(8), dp(2), dp(2));
-
-        FrameLayout[] buttons = new FrameLayout[values.length];
-        View[] dots = new View[values.length];
-        Runnable[] update = new Runnable[1];
-        update[0] = () -> {
-            for (int i = 0; i < values.length; i++) {
-                boolean selected = values[i].equals(active[0]);
-                int swatch = RingConfig.ringSwatchColor(values[i], colors.dark);
-                buttons[i].setBackground(Ui.border(this,
-                        selected ? colors.accentWash : Color.TRANSPARENT, 20,
-                        selected ? swatch : Color.TRANSPARENT));
-                buttons[i].setSelected(selected);
-                dots[i].setBackground(Ui.border(this, swatch, 14,
-                        selected ? colors.surface : withAlpha(colors.text, 0x26)));
-                if (selected) {
-                    activeLabel.setText(getString(labels[i]));
-                    activeLabel.setTextColor(swatch);
-                }
-            }
+        ColorSpectrumBar bar = new ColorSpectrumBar(this, currentHue[0]);
+        Runnable syncUi = () -> {
+            boolean isDef = currentHue[0] < 0;
+            int dotFill = isDef ? colors.pick(0xfff3f5fc, 0xff252e46)
+                    : RingConfig.ringPreviewColor(currentHue[0]);
+            previewDot.setBackground(Ui.border(this, dotFill, 9, colors.border));
+            defaultBtn.setBackground(Ui.pressable(this,
+                    isDef ? colors.accentWash : colors.rail, 10,
+                    isDef ? colors.accent : colors.border));
+            defaultBtn.setTextColor(isDef ? colors.accent : colors.muted);
         };
+        defaultBtn.setOnClickListener(v -> {
+            if (currentHue[0] < 0) return;
+            currentHue[0] = RingConfig.HUE_DEFAULT;
+            bar.setHue(RingConfig.HUE_DEFAULT);
+            RingConfig.setRingHue(this, RingConfig.HUE_DEFAULT);
+            syncUi.run();
+            if (previewMenu != null) previewMenu.reloadColors();
+            else refreshPreview(shortcuts.selected());
+        });
+        bar.setOnHueChangedListener((hue, finished) -> {
+            currentHue[0] = hue;
+            RingConfig.setRingHue(this, hue);
+            syncUi.run();
+            if (previewMenu != null) previewMenu.reloadColors();
+            else refreshPreview(shortcuts.selected());
+        });
+        syncUi.run();
 
-        for (int i = 0; i < values.length; i++) {
-            String value = values[i];
-            FrameLayout cell = new FrameLayout(this);
-            cell.setContentDescription(getString(labels[i]));
-            cell.setTooltipText(getString(labels[i]));
-            cell.setFocusable(true);
-            View dot = new View(this);
-            cell.addView(dot, new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER));
-            cell.setOnClickListener(view -> {
-                if (value.equals(active[0])) return;
-                active[0] = value;
-                RingConfig.setRingColor(this, value);
-                update[0].run();
-                refreshPreview(shortcuts.selected());
-            });
-            LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(dp(38), dp(38));
-            if (i > 0) cellParams.setMarginStart(dp(6));
-            swatches.addView(cell, cellParams);
-            buttons[i] = cell;
-            dots[i] = dot;
-        }
-        update[0].run();
-
-        android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
-        scroller.setHorizontalScrollBarEnabled(false);
-        scroller.addView(swatches, new FrameLayout.LayoutParams(-2, -2));
-        row.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams barP = new LinearLayout.LayoutParams(-1, dp(42));
+        barP.topMargin = dp(6);
+        row.addView(bar, barP);
         return row;
+    }
+
+    private interface OnHueChangedListener {
+        void onHueChanged(int hue, boolean finished);
+    }
+
+    /** Sleek 1-bar full-spectrum rainbow gradient slider for picking any ring color smoothly. */
+    private final class ColorSpectrumBar extends View {
+        private final android.graphics.Paint trackPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint borderPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint thumbFill = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint thumbRim = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.RectF trackRect = new android.graphics.RectF();
+        private final int[] spectrum = {
+                0xffe63946, 0xfff77f00, 0xffe9c46a, 0xff2a9d8f,
+                0xff00b4d8, 0xff3b82f6, 0xff7c3aed, 0xffec4899, 0xffe63946
+        };
+        private int hue;
+        private OnHueChangedListener listener;
+
+        ColorSpectrumBar(Context context, int initialHue) {
+            super(context);
+            this.hue = initialHue;
+            borderPaint.setStyle(android.graphics.Paint.Style.STROKE);
+            borderPaint.setStrokeWidth(dp(1));
+            borderPaint.setColor(colors.border);
+            thumbRim.setStyle(android.graphics.Paint.Style.STROKE);
+            thumbRim.setStrokeWidth(dp(3));
+            thumbRim.setColor(0xffffffff);
+            thumbFill.setShadowLayer(dp(4), 0, dp(1.5f), 0x44000000);
+            setLayerType(LAYER_TYPE_SOFTWARE, null);
+        }
+
+        void setHue(int newHue) {
+            this.hue = newHue;
+            invalidate();
+        }
+
+        void setOnHueChangedListener(OnHueChangedListener l) {
+            this.listener = l;
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            float pad = dp(14);
+            if (w > pad * 2) {
+                trackPaint.setShader(new android.graphics.LinearGradient(
+                        pad, 0, w - pad, 0, spectrum, null, Shader.TileMode.CLAMP));
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            float pad = dp(14);
+            float trackH = dp(14);
+            float cy = h * 0.5f;
+            trackRect.set(pad, cy - trackH * 0.5f, w - pad, cy + trackH * 0.5f);
+            float r = trackH * 0.5f;
+            canvas.drawRoundRect(trackRect, r, r, trackPaint);
+            canvas.drawRoundRect(trackRect, r, r, borderPaint);
+
+            if (hue >= 0) {
+                float frac = (hue % 360) / 360f;
+                float cx = pad + frac * (w - pad * 2f);
+                float thumbR = dp(12);
+                thumbFill.setColor(RingConfig.ringPreviewColor(hue));
+                canvas.drawCircle(cx, cy, thumbR, thumbFill);
+                canvas.drawCircle(cx, cy, thumbR - dp(1.2f), thumbRim);
+            }
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                getParent().requestDisallowInterceptTouchEvent(true);
+            }
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE
+                    || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                float pad = dp(14);
+                float span = Math.max(1f, getWidth() - pad * 2f);
+                float frac = Math.max(0f, Math.min(1f, (event.getX() - pad) / span));
+                int newHue = Math.min(359, Math.round(frac * 359f));
+                boolean finished = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
+                if (newHue != hue || finished) {
+                    hue = newHue;
+                    invalidate();
+                    if (listener != null) listener.onHueChanged(hue, finished);
+                }
+                return true;
+            }
+            return super.onTouchEvent(event);
+        }
     }
 
     private static int withAlpha(int color, int alpha) {

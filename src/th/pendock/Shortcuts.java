@@ -33,7 +33,8 @@ final class Shortcuts {
         CIRCLE_SEARCH("tool:circle_search", R.string.circle_search, R.drawable.ic_circle_search),
         FLOAT_WINDOW("tool:float_window", R.string.float_window, R.drawable.ic_float),
         SPLIT_SCREEN("tool:split_screen", R.string.split_screen, R.drawable.ic_split),
-        LASER_POINTER("tool:laser_pointer", R.string.laser_tool, R.drawable.ic_laser);
+        LASER_POINTER("tool:laser_pointer", R.string.laser_tool, R.drawable.ic_laser),
+        TRANSLATE("tool:translate", R.string.translate_tool, R.drawable.ic_translate);
 
         final String id;
         final int label;

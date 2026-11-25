@@ -19,18 +19,7 @@ final class RingConfig {
     static final String THEME_LIGHT = "light";
     static final String THEME_DARK = "dark";
 
-    static final String COLOR_DEFAULT = "default";
-    static final String COLOR_OCEAN = "ocean";
-    static final String COLOR_TEAL = "teal";
-    static final String COLOR_VIOLET = "violet";
-    static final String COLOR_ROSE = "rose";
-    static final String COLOR_AMBER = "amber";
-    static final String COLOR_CORAL = "coral";
-    static final String COLOR_GRAPHITE = "graphite";
-    static final String[] COLOR_VALUES = {
-            COLOR_DEFAULT, COLOR_OCEAN, COLOR_TEAL, COLOR_VIOLET,
-            COLOR_ROSE, COLOR_AMBER, COLOR_CORAL, COLOR_GRAPHITE
-    };
+    static final int HUE_DEFAULT = -1;
 
     static final String LAUNCH_FLOATING = "floating";
     static final String LAUNCH_SPLIT = "split";
@@ -43,7 +32,7 @@ final class RingConfig {
     private static final String RING_SIZE = "ring_size";
     private static final String RING_STYLE = "ring_style";
     private static final String RING_THEME = "ring_theme";
-    private static final String RING_COLOR = "ring_color";
+    private static final String RING_HUE = "ring_color_hue";
     private static final String RING_DIM = "ring_dim_percent";
     private static final String RING_BLUR = "ring_blur_dp";
     private static final String LAUNCH_MODE = "launch_mode";
@@ -116,43 +105,30 @@ final class RingConfig {
                 == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
 
-    static String ringColor(Context context) {
-        String value = prefs(context).getString(RING_COLOR, COLOR_DEFAULT);
-        for (String valid : COLOR_VALUES) {
-            if (valid.equals(value)) return value;
-        }
-        return COLOR_DEFAULT;
+    static int ringHue(Context context) {
+        int hue = prefs(context).getInt(RING_HUE, HUE_DEFAULT);
+        if (hue < 0) return HUE_DEFAULT;
+        return hue % 360;
     }
 
-    static void setRingColor(Context context, String color) {
-        prefs(context).edit().putString(RING_COLOR, color).apply();
+    static void setRingHue(Context context, int hue) {
+        int stored = hue < 0 ? HUE_DEFAULT : (hue % 360);
+        prefs(context).edit().putInt(RING_HUE, stored).apply();
     }
 
-    static int ringAccentLight(String color) {
-        if (COLOR_OCEAN.equals(color)) return 0xff0070e0;
-        if (COLOR_TEAL.equals(color)) return 0xff0d9488;
-        if (COLOR_VIOLET.equals(color)) return 0xff7c3aed;
-        if (COLOR_ROSE.equals(color)) return 0xffe11d6d;
-        if (COLOR_AMBER.equals(color)) return 0xffd97706;
-        if (COLOR_CORAL.equals(color)) return 0xffea580c;
-        if (COLOR_GRAPHITE.equals(color)) return 0xff3b4454;
-        return 0xff3454d1;
+    static int ringAccentLight(int hue) {
+        if (hue < 0) return 0xff3454d1;
+        return android.graphics.Color.HSVToColor(new float[] {hue % 360, 0.78f, 0.80f});
     }
 
-    static int ringAccentDark(String color) {
-        if (COLOR_OCEAN.equals(color)) return 0xff6cb8ff;
-        if (COLOR_TEAL.equals(color)) return 0xff5eead4;
-        if (COLOR_VIOLET.equals(color)) return 0xffc4b5fd;
-        if (COLOR_ROSE.equals(color)) return 0xfffda4af;
-        if (COLOR_AMBER.equals(color)) return 0xfffcd34d;
-        if (COLOR_CORAL.equals(color)) return 0xfffdba74;
-        if (COLOR_GRAPHITE.equals(color)) return 0xffd8e0ec;
-        return 0xffaabaff;
+    static int ringAccentDark(int hue) {
+        if (hue < 0) return 0xffaabaff;
+        return android.graphics.Color.HSVToColor(new float[] {hue % 360, 0.50f, 0.96f});
     }
 
-    static int ringSwatchColor(String color, boolean dark) {
-        if (COLOR_GRAPHITE.equals(color)) return dark ? 0xff94a3b8 : 0xff475569;
-        return dark ? ringAccentDark(color) : ringAccentLight(color);
+    static int ringPreviewColor(int hue) {
+        if (hue < 0) return 0xffeef2f8;
+        return android.graphics.Color.HSVToColor(new float[] {hue % 360, 0.82f, 0.88f});
     }
 
     static int ringDimPercent(Context context) {

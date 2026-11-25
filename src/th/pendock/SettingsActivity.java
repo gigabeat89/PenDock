@@ -79,6 +79,7 @@ public class SettingsActivity extends Activity {
         addDropdown(preferences, R.string.language, Appearance.LANGUAGE, Appearance.language(this),
                 new String[] {"ภาษาไทย", "English"}, new String[] {"th", "en"});
         add(page, preferences, 14);
+        add(page, ocrModelsCard(), 14);
         add(page, termsCard(), 14);
         add(page, contactCard(), 14);
         setContentView(scroll);
@@ -219,6 +220,113 @@ public class SettingsActivity extends Activity {
         int width = getResources().getConfiguration().screenWidthDp;
         row.addView(spinner, new LinearLayout.LayoutParams(Ui.dp(this, width < 400 ? 140 : 190), Ui.dp(this, 48)));
         preferences.addView(row, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private LinearLayout ocrModelsCard() {
+        LinearLayout card = card();
+        card.addView(heading(R.string.ocr_models_title));
+        add(card, Ui.text(this, getString(R.string.ocr_models_intro), 13, colors.muted, false), 6);
+
+        // Default target language dropdown
+        LinearLayout langRow = new LinearLayout(this);
+        langRow.setGravity(Gravity.CENTER_VERTICAL);
+        langRow.setMinimumHeight(Ui.dp(this, 52));
+        langRow.addView(Ui.text(this, getString(R.string.ocr_target_language), 15, colors.text, true),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        Spinner targetSpinner = new Spinner(this, Spinner.MODE_DROPDOWN);
+        targetSpinner.setPopupBackgroundDrawable(Ui.border(this, colors.surface, 12, colors.border));
+        ArrayAdapter<String> targetAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, GoogleTranslator.TARGET_BADGES);
+        targetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        targetSpinner.setAdapter(targetAdapter);
+        String curTarget = OcrModelManager.targetLang(this);
+        int selIdx = Math.max(0, java.util.Arrays.asList(GoogleTranslator.TARGET_CODES).indexOf(curTarget));
+        targetSpinner.setSelection(selIdx);
+        targetSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                OcrModelManager.setTargetLang(SettingsActivity.this, GoogleTranslator.TARGET_CODES[position]);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        langRow.addView(targetSpinner, new LinearLayout.LayoutParams(Ui.dp(this, 130), Ui.dp(this, 44)));
+        add(card, langRow, 8);
+
+        TextView storageLabel = Ui.text(this, "", 12, colors.muted, false);
+        add(card, storageLabel, 4);
+
+        LinearLayout list = Ui.column(this);
+        add(card, list, 8);
+
+        Runnable[] rebuild = new Runnable[1];
+        boolean[] busy = {false};
+        rebuild[0] = () -> {
+            long totalBytes = OcrModelManager.totalInstalledBytes(this);
+            storageLabel.setText(getString(R.string.ocr_storage_used, OcrModelManager.formatMb(totalBytes)));
+            storageLabel.setVisibility(totalBytes > 0 ? View.VISIBLE : View.GONE);
+            list.removeAllViews();
+            for (OcrModelManager.Pack pack : OcrModelManager.Pack.values()) {
+                boolean ready = OcrModelManager.isPackReady(this, pack);
+                LinearLayout row = new LinearLayout(this);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+                row.setBackground(Ui.border(this, colors.rail, 12, colors.border));
+
+                LinearLayout info = Ui.column(this);
+                info.addView(Ui.text(this, getString(pack.labelRes), 14, colors.text, true));
+                long bytes = ready ? OcrModelManager.packInstalledBytes(this, pack)
+                        : OcrModelManager.estimatedDownloadBytes(this, pack);
+                TextView detail = Ui.text(this,
+                        (ready ? getString(R.string.ocr_installed) + " · " : "")
+                                + OcrModelManager.formatMb(bytes),
+                        12, colors.muted, false);
+                info.addView(detail);
+                row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+
+                TextView btn = Ui.action(this,
+                        getString(ready ? R.string.ocr_delete : R.string.ocr_download), !ready, () -> { });
+                btn.setOnClickListener(v -> {
+                    if (busy[0]) return;
+                    if (OcrModelManager.isPackReady(this, pack)) {
+                        OcrModelManager.deletePack(this, pack);
+                        rebuild[0].run();
+                        return;
+                    }
+                    busy[0] = true;
+                    btn.setEnabled(false);
+                    btn.setText(getString(R.string.ocr_downloading, 0));
+                    updates.execute(() -> {
+                        try {
+                            OcrModelManager.downloadPack(this, pack, (pct, done, total) ->
+                                    runOnUiThread(() -> {
+                                        if (!isFinishing() && !isDestroyed()) {
+                                            btn.setText(getString(R.string.ocr_downloading, pct));
+                                        }
+                                    }));
+                            runOnUiThread(() -> {
+                                busy[0] = false;
+                                if (!isFinishing() && !isDestroyed()) rebuild[0].run();
+                            });
+                        } catch (Exception err) {
+                            android.util.Log.w("PenDock", "OCR download failed", err);
+                            runOnUiThread(() -> {
+                                busy[0] = false;
+                                if (!isFinishing() && !isDestroyed()) {
+                                    Toast.makeText(this, R.string.ocr_download_failed, Toast.LENGTH_LONG).show();
+                                    rebuild[0].run();
+                                }
+                            });
+                        }
+                    });
+                });
+                row.addView(btn, new LinearLayout.LayoutParams(-2, -2));
+
+                LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+                if (list.getChildCount() > 0) rp.topMargin = Ui.dp(this, 8);
+                list.addView(row, rp);
+            }
+        };
+        rebuild[0].run();
+        return card;
     }
 
     private LinearLayout termsCard() {

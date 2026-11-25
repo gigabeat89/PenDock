@@ -57,7 +57,7 @@ final class RadialMenu extends FrameLayout {
     private final boolean penOnly, preview, requireHover, useSeparateSurface;
     private final float maxScale;
     private final String style;
-    private final Appearance.Palette colors;
+    private Appearance.Palette colors;
     private final Runnable fallback = this::revealAtCenter;
     private boolean waitingForHover;
     private boolean revealed;
@@ -82,23 +82,25 @@ final class RadialMenu extends FrameLayout {
     private float batteryExpansion;
 
     RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
-            Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode, Runnable close,
+            Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode,
+            Runnable translateScreen, Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             Bitmap blurFrame) {
-        this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, laserMode, close,
-                entries, launch, battery, floatActive, alreadyWindowed, splitActive, alreadySplit,
-                blurFrame, false);
+        this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, laserMode,
+                translateScreen, close, entries, launch, battery, floatActive, alreadyWindowed,
+                splitActive, alreadySplit, blurFrame, false);
     }
 
     static RadialMenu preview(Context context, List<Shortcuts.Entry> entries) {
         Runnable sample = () -> { };
-        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample,
+        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample, sample,
                 entries, app -> { }, "—", sample, false, sample, false, null, true);
     }
 
     private RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
-            Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode, Runnable close,
+            Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode,
+            Runnable translateScreen, Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             Bitmap blurFrame, boolean preview) {
@@ -198,6 +200,7 @@ final class RadialMenu extends FrameLayout {
                                 ? R.string.split_already : R.string.split_unavailable);
                         break;
                     case LASER_POINTER: action = laserMode; break;
+                    case TRANSLATE: action = translateScreen; break;
                 }
             }
             addButton(index, entry.icon, label, action);
@@ -236,6 +239,14 @@ final class RadialMenu extends FrameLayout {
             dimProgress = 1f;
             applyDim();
         }
+    }
+
+    void reloadColors() {
+        colors = Appearance.ringPalette(getContext());
+        hub.setTextColor(colors.text);
+        batteryStatus.setTextColor(colors.accent);
+        java.util.Arrays.fill(iconColors, 0);
+        updateArtwork();
     }
 
     private void applyDim() {

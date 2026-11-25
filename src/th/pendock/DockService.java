@@ -91,11 +91,16 @@ public class DockService extends Service {
     private Intent splitPickerIntent;
     private ComponentName splitPickerActivity;
     private LaserOverlay laserOverlay;
+    private TranslateOverlay translateOverlay;
+    private WindowManager.LayoutParams translateParams;
+    private View translateToolbarView;
+    private WindowManager.LayoutParams translateToolbarParams;
     private FloatingPulse floatingPulse;
     private final android.util.LruCache<Integer, Float> floatingScales = new android.util.LruCache<>(16);
     private int pulseRequest;
     private Bitmap circleFrame;
     private int circleRequest;
+    private int translateRequest;
     private int splitRequest;
     private int menuRequest;
     private boolean splitTransitioning;
@@ -122,6 +127,7 @@ public class DockService extends Service {
             if (getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
             android.util.Log.d("PenDock", "Huawei stylus double tap");
             if (circleSelection != null) cancelCircleSearch();
+            else if (translateOverlay != null && !translateOverlay.isPaused()) cancelTranslateOverlay();
             else if (splitPicker != null || splitTransitioning) return;
             else if (laserOverlay != null) cancelLaserOverlay();
             else if (menu != null) menu.dismiss();
@@ -132,6 +138,10 @@ public class DockService extends Service {
     private final BroadcastReceiver screenChange = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             cancelCircleSearch();
+            // Keep TranslateOverlay alive across app switches / Home; pause it if screen turns off while active.
+            if (translateOverlay != null && !translateOverlay.isPaused()) {
+                translateOverlay.pauseIfActive();
+            }
             cancelSplitPicker();
             cancelLaserOverlay();
             cancelFloatingPulse();
@@ -208,6 +218,10 @@ public class DockService extends Service {
             refreshShortcuts();
         }
         cancelCircleSearch();
+        if (translateOverlay != null) {
+            if (!translateOverlay.isPaused()) translateOverlay.pauseIfActive();
+            translateOverlay.onDisplayRotated();
+        }
         cancelLaserOverlay();
         cancelFloatingPulse();
         detach();
@@ -237,7 +251,9 @@ public class DockService extends Service {
     }
 
     private void showMenu(boolean useHover) {
-        if (menu != null || circleSelection != null || splitPicker != null || laserOverlay != null) return;
+        if (menu != null || circleSelection != null
+                || (translateOverlay != null && !translateOverlay.isPaused())
+                || splitPicker != null || laserOverlay != null) return;
         if (!Settings.canDrawOverlays(this)) {
             stopSelf();
             return;
@@ -265,6 +281,7 @@ public class DockService extends Service {
     private void attachMenu(int request, boolean useHover, WindowModeMonitor.FocusedApp focused,
             Map<String, WindowModeMonitor.FloatingWindow> openFloating, Set<String> visibleApps, Bitmap blurFrame) {
         if (request != menuRequest || !running || menu != null || circleSelection != null
+                || (translateOverlay != null && !translateOverlay.isPaused())
                 || splitPicker != null || laserOverlay != null
                 || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
             if (blurFrame != null) blurFrame.recycle();
@@ -294,7 +311,7 @@ public class DockService extends Service {
         RadialMenu[] menuRef = new RadialMenu[1];
         RadialMenu opened = new RadialMenu(menuContext, bounds.exactCenterX(), bounds.exactCenterY(), useHover,
                 this::lockScreen, this::takeScreenshot, this::startCircleSearch, this::startLaserPointer,
-                () -> detach(menuRef[0]),
+                this::startTranslate, () -> detach(menuRef[0]),
                 entries, app -> openShortcut(app, focused, openFloating, visibleApps), "—",
                 activeTarget == null || alreadyWindowed ? null : () -> floatActive(activeTarget, focused),
                 alreadyWindowed,
@@ -514,6 +531,158 @@ public class DockService extends Service {
         removeOverlay(removed);
         circleFrame.recycle();
         circleFrame = null;
+    }
+
+    private void startTranslate() {
+        detach();
+        if (Build.VERSION.SDK_INT < 30) {
+            Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!CircleCaptureService.isReady()) {
+            open(MainActivity.class);
+            Toast.makeText(this, Appearance.text(this, R.string.translate_permission_message),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        captureAndShowTranslate();
+    }
+
+    private void captureAndShowTranslate() {
+        cancelTranslateOverlay();
+        int request = ++translateRequest;
+        main.postDelayed(() -> {
+            if (request != translateRequest || menu != null) return;
+            CircleCaptureService.capture(frame -> showTranslateOverlay(request, frame));
+        }, 120);
+    }
+
+    private void showTranslateOverlay(int request, Bitmap frame) {
+        if (request != translateRequest || menu != null
+                || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+            if (frame != null) frame.recycle();
+            return;
+        }
+        if (frame == null) {
+            Toast.makeText(this, Appearance.text(this, R.string.capture_failed), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            frame.recycle();
+            stopSelf();
+            return;
+        }
+        TranslateOverlay[] ref = new TranslateOverlay[1];
+        TranslateOverlay overlay = new TranslateOverlay(menuContext, frame, new TranslateOverlay.Host() {
+            @Override public void onPause() {
+                if (translateOverlay != ref[0] || translateParams == null || manager == null) return;
+                // Keep stage window attached behind the persistent toolbar, but invisible & pass-through.
+                ref[0].setVisibility(View.GONE);
+                translateParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+                try {
+                    manager.updateViewLayout(ref[0], translateParams);
+                } catch (IllegalArgumentException ignored) { }
+            }
+
+            @Override public void onMoveToolbar(int windowX, int windowY) {
+                if (translateOverlay != ref[0] || translateToolbarView == null
+                        || translateToolbarParams == null || manager == null) return;
+                translateToolbarParams.x = windowX;
+                translateToolbarParams.y = windowY;
+                try {
+                    manager.updateViewLayout(translateToolbarView, translateToolbarParams);
+                } catch (IllegalArgumentException ignored) { }
+            }
+
+            @Override public void onRequestResume() {
+                if (translateOverlay != ref[0] || translateParams == null || manager == null) return;
+                int resumeReq = ++translateRequest;
+                // Capture immediately without hiding the persistent toolbar so it never blinks.
+                CircleCaptureService.capture(fresh -> {
+                    if (resumeReq != translateRequest || translateOverlay != ref[0] || menu != null) {
+                        if (fresh != null) fresh.recycle();
+                        return;
+                    }
+                    if (fresh == null) {
+                        Toast.makeText(DockService.this, Appearance.text(DockService.this, R.string.capture_failed),
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    translateParams.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+                    ref[0].setVisibility(View.VISIBLE);
+                    try {
+                        manager.updateViewLayout(ref[0], translateParams);
+                    } catch (IllegalArgumentException ignored) { }
+                    ref[0].resumeWithFrame(fresh);
+                    ref[0].requestFocus();
+                });
+            }
+
+            @Override public void onClose() {
+                cancelTranslateOverlay();
+            }
+        });
+        ref[0] = overlay;
+        WindowManager.LayoutParams stageParams = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        stageParams.setTitle("PenDock translate stage");
+        stageParams.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= 30) {
+            stageParams.setFitInsetsTypes(0);
+            stageParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+
+        View toolbarView = overlay.toolbarWindowView();
+        WindowManager.LayoutParams barParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        barParams.setTitle("PenDock translate bar");
+        barParams.gravity = Gravity.TOP | Gravity.LEFT;
+        barParams.x = overlay.initialToolbarWindowX();
+        barParams.y = overlay.initialToolbarWindowY();
+        if (Build.VERSION.SDK_INT >= 30) {
+            barParams.setFitInsetsTypes(0);
+            barParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        try {
+            manager.addView(overlay, stageParams);
+            manager.addView(toolbarView, barParams);
+            translateOverlay = overlay;
+            translateParams = stageParams;
+            translateToolbarView = toolbarView;
+            translateToolbarParams = barParams;
+            overlay.requestFocus();
+        } catch (WindowManager.BadTokenException | SecurityException unavailable) {
+            removeOverlay(toolbarView);
+            removeOverlay(overlay);
+            frame.recycle();
+            Toast.makeText(this, Appearance.text(this, R.string.translate_overlay_failed),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void cancelTranslateOverlay() {
+        translateRequest++;
+        translateParams = null;
+        translateToolbarParams = null;
+        if (translateToolbarView != null) {
+            View bar = translateToolbarView;
+            translateToolbarView = null;
+            removeOverlay(bar);
+        }
+        if (translateOverlay == null) return;
+        TranslateOverlay removed = translateOverlay;
+        translateOverlay = null;
+        removeOverlay(removed);
     }
 
     private void open(Class<?> activity) {
@@ -2003,6 +2172,7 @@ public class DockService extends Service {
         }
         main.removeCallbacksAndMessages(null);
         cancelCircleSearch();
+        cancelTranslateOverlay();
         cancelSplitPicker();
         cancelLaserOverlay();
         cancelFloatingPulse();

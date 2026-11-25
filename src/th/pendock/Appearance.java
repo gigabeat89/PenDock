@@ -51,7 +51,7 @@ final class Appearance {
     }
 
     static Palette ringPalette(Context context) {
-        return new Palette(RingConfig.isRingDark(context), RingConfig.ringColor(context));
+        return new Palette(RingConfig.isRingDark(context), RingConfig.ringHue(context));
     }
 
     static final class Palette {
@@ -61,10 +61,10 @@ final class Appearance {
         final int glassFill, glassHub, glassSlice, glassSheenAccent;
 
         Palette(boolean dark) {
-            this(dark, RingConfig.COLOR_DEFAULT);
+            this(dark, RingConfig.HUE_DEFAULT);
         }
 
-        Palette(boolean dark, String ringColor) {
+        Palette(boolean dark, int ringHue) {
             this.dark = dark;
             background = pick(0xfff7f8fc, 0xff11151f);
             rail = pick(0xffeceff7, 0xff181e2b);
@@ -75,7 +75,7 @@ final class Appearance {
             ringShadow = pick(0x42101a33, 0x99000000);
             disabledInk = pick(0xff687588, 0xff9ba7bc);
 
-            if (RingConfig.COLOR_DEFAULT.equals(ringColor)) {
+            if (ringHue < 0) {
                 accent = pick(0xff3454d1, 0xffaabaff);
                 accentWash = pick(0xffe0e7ff, 0xff273456);
                 petal = pick(0xfff3f5fc, 0xff252e46);
@@ -88,26 +88,20 @@ final class Appearance {
                 glassSlice = pick(0xffffffff, 0xff7da2ff);
                 glassSheenAccent = 0x1c9cb8ff;
             } else {
-                int lightAccent = RingConfig.ringAccentLight(ringColor);
-                int darkAccent = RingConfig.ringAccentDark(ringColor);
-                boolean neutral = RingConfig.COLOR_GRAPHITE.equals(ringColor);
+                int lightAccent = RingConfig.ringAccentLight(ringHue);
+                int darkAccent = RingConfig.ringAccentDark(ringHue);
                 accent = pick(lightAccent, darkAccent);
                 accentWash = pick(mix(0xffffffff, lightAccent, 0.14f), mix(0xff171b24, lightAccent, 0.28f));
-                petal = pick(mix(0xffffffff, lightAccent, neutral ? 0.08f : 0.12f),
-                        mix(0xff1a1f2b, lightAccent, neutral ? 0.16f : 0.23f));
-                petalSelected = pick(mix(0xffffffff, lightAccent, neutral ? 0.18f : 0.27f),
-                        mix(0xff232a3a, lightAccent, neutral ? 0.34f : 0.48f));
-                petalDisabled = pick(mix(0xffe7ebf3, lightAccent, 0.05f),
-                        mix(0xff191e2a, lightAccent, 0.08f));
-                core = pick(mix(0xffffffff, lightAccent, neutral ? 0.03f : 0.06f),
-                        mix(0xff141822, lightAccent, neutral ? 0.10f : 0.16f));
-                ringBorder = pick(withAlpha(lightAccent, neutral ? 0x44 : 0x5c),
-                        withAlpha(darkAccent, neutral ? 0x68 : 0x8a));
-                glassFill = pick(withAlpha(mix(0xffffffff, lightAccent, neutral ? 0.10f : 0.19f), 0x80),
-                        withAlpha(mix(0xff151a24, lightAccent, neutral ? 0.20f : 0.34f), 0x76));
-                glassHub = pick(withAlpha(mix(0xffffffff, lightAccent, neutral ? 0.06f : 0.11f), 0xa4),
-                        withAlpha(mix(0xff131722, lightAccent, neutral ? 0.14f : 0.24f), 0x94));
-                glassSlice = pick(mix(0xffffffff, lightAccent, neutral ? 0.12f : 0.24f), darkAccent);
+                petal = pick(mix(0xffffffff, lightAccent, 0.12f), mix(0xff1a1f2b, lightAccent, 0.23f));
+                petalSelected = pick(mix(0xffffffff, lightAccent, 0.27f), mix(0xff232a3a, lightAccent, 0.48f));
+                petalDisabled = pick(mix(0xffe7ebf3, lightAccent, 0.05f), mix(0xff191e2a, lightAccent, 0.08f));
+                core = pick(mix(0xffffffff, lightAccent, 0.06f), mix(0xff141822, lightAccent, 0.16f));
+                ringBorder = pick(withAlpha(lightAccent, 0x5c), withAlpha(darkAccent, 0x8a));
+                glassFill = pick(withAlpha(mix(0xffffffff, lightAccent, 0.19f), 0x80),
+                        withAlpha(mix(0xff151a24, lightAccent, 0.34f), 0x76));
+                glassHub = pick(withAlpha(mix(0xffffffff, lightAccent, 0.11f), 0xa4),
+                        withAlpha(mix(0xff131722, lightAccent, 0.24f), 0x94));
+                glassSlice = pick(mix(0xffffffff, lightAccent, 0.24f), darkAccent);
                 glassSheenAccent = withAlpha(darkAccent, 0x2a);
             }
         }

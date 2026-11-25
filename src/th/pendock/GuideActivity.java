@@ -203,6 +203,10 @@ public class GuideActivity extends Activity {
                 t("Laser pointer (ตัวชี้เลเซอร์)", "Laser pointer"),
                 t("เปิดตัวชี้เลเซอร์เต็มจอสำหรับพรีเซนต์งาน มีจุดโฮเวอร์เรืองแสง เส้นลากจางหาย และสลับสีได้ (แดง / เขียว / ฟ้า) ดับเบิลแทปปากกาหรือกด Back/Close เพื่อออก",
                         "Opens a full-screen presentation laser pointer with a glowing hover dot, fading drag trail, and red / green / blue color switching. Double-tap the stylus or press Back / Close to exit.")));
+        addDividerRow(tools, iconRow(R.drawable.ic_translate,
+                t("Screen translate (แปลหน้าจอ 3 โหมด)", "Screen translate (3 modes)"),
+                t("ใช้ PaddleOCR PP-OCRv5 บนเครื่อง (โหลดชุดภาษา EN / จีน·ญี่ปุ่น / เกาหลี / ไทย แบบ On-Demand) คู่กับ Google Translate ฟรี รองรับทั้งลากกรอบแปล, ชี้แปลด้วยปากกา (คำ/บรรทัด) และแปลทั้งหน้าจอพร้อมกดค้างรูปตาดูต้นฉบับ",
+                        "Powered by on-device PaddleOCR PP-OCRv5 (on-demand language packs for EN / CJK / KR / TH) and Google Translate. Supports Box drag, stylus Hover/Point (word or line), and Full-screen in-place overlay with hold-to-peek.")));
         addDividerRow(tools, iconRow(R.drawable.ic_capture,
                 t("Screenshot & Lock screen", "Screenshot & Lock screen"),
                 t("สั่งแคปหน้าจอหรือล็อกหน้าจอได้ทันทีจากในวงเมนูโดยไม่ต้องเอื้อมกดปุ่มข้างเครื่อง",
