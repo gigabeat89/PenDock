@@ -105,8 +105,16 @@ public class SettingsActivity extends Activity {
         updateStatus = Ui.text(this, "", 13, colors.muted, false);
         updateStatus.setVisibility(View.GONE);
         add(about, updateStatus, 10);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        TextView guideButton = Ui.action(this, getString(R.string.user_guide), false,
+                () -> startActivity(new Intent(this, GuideActivity.class)));
+        actions.addView(guideButton, new LinearLayout.LayoutParams(-2, -2));
         checkUpdateButton = Ui.action(this, getString(R.string.check_updates), false, this::checkForUpdates);
-        add(about, checkUpdateButton, 12);
+        LinearLayout.LayoutParams updateParams = new LinearLayout.LayoutParams(-2, -2);
+        updateParams.setMarginStart(Ui.dp(this, 8));
+        actions.addView(checkUpdateButton, updateParams);
+        add(about, actions, 12);
         return about;
     }
 

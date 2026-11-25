@@ -53,7 +53,7 @@ public class DockService extends Service {
     static void removeStateListener(Runnable listener) { stateListeners.remove(listener); }
 
     static boolean isEnabled(Context context) {
-        return context.getSharedPreferences("tools", Context.MODE_PRIVATE).getBoolean(PREF_ENABLED, false);
+        return context.getSharedPreferences("tools", Context.MODE_PRIVATE).getBoolean(PREF_ENABLED, true);
     }
 
     static void setEnabled(Context context, boolean enabled) {
@@ -152,7 +152,6 @@ public class DockService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (!Settings.canDrawOverlays(this)) {
-            setEnabled(this, false);
             stopSelf();
             return START_NOT_STICKY;
         }

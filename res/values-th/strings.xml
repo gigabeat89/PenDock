@@ -143,6 +143,17 @@
     <string name="auto_start_boot">เปิดวงเมนูอัตโนมัติหลังรีสตาร์ท</string>
     <string name="ring_appearance">รูปลักษณ์วงเมนู</string>
     <string name="ring_style">รูปแบบวงเมนู</string>
+    <string name="ring_theme">ธีมวงเมนู</string>
+    <string name="ring_theme_app">ตามแอพ</string>
+    <string name="ring_color">สีวงเมนู</string>
+    <string name="color_default">ค่าเริ่มต้น</string>
+    <string name="color_ocean">ฟ้าน้ำทะเล</string>
+    <string name="color_teal">เขียวมรกต</string>
+    <string name="color_violet">ม่วง</string>
+    <string name="color_rose">ชมพูโรส</string>
+    <string name="color_amber">ทองอำพัน</string>
+    <string name="color_coral">ส้มคอรัล</string>
+    <string name="color_graphite">กราไฟต์</string>
     <string name="style_petals">กลีบดอก</string>
     <string name="style_orbit">วงโคจร</string>
     <string name="style_halo">กระจก</string>
@@ -189,6 +200,7 @@
     <string name="circle_copy_failed">คัดลอกรูปภาพไม่สำเร็จ</string>
     <string name="circle_share_title">แชร์ส่วนที่วง</string>
     <string name="circle_ready_prompt">เลือกคำสั่ง หรือวงใหม่อีกครั้ง</string>
+    <string name="user_guide">คู่มือการใช้งาน</string>
     <string name="check_updates">ตรวจสอบอัปเดต</string>
     <string name="checking_updates">กำลังตรวจสอบอัปเดต…</string>
     <string name="update_up_to_date">คุณใช้เวอร์ชันล่าสุดแล้ว (v%1$s)</string>

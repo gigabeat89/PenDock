@@ -144,6 +144,17 @@
     <string name="auto_start_boot">Start ring automatically after reboot</string>
     <string name="ring_appearance">Ring appearance</string>
     <string name="ring_style">Ring style</string>
+    <string name="ring_theme">Ring theme</string>
+    <string name="ring_theme_app">Follow app</string>
+    <string name="ring_color">Ring color</string>
+    <string name="color_default">Default</string>
+    <string name="color_ocean">Ocean blue</string>
+    <string name="color_teal">Emerald</string>
+    <string name="color_violet">Violet</string>
+    <string name="color_rose">Rose</string>
+    <string name="color_amber">Amber</string>
+    <string name="color_coral">Coral</string>
+    <string name="color_graphite">Graphite</string>
     <string name="style_petals">Petals</string>
     <string name="style_orbit">Orbit</string>
     <string name="style_halo">Glass</string>
@@ -190,6 +201,7 @@
     <string name="circle_copy_failed">Couldn\'t copy the image.</string>
     <string name="circle_share_title">Share selected area</string>
     <string name="circle_ready_prompt">Choose an action or circle again</string>
+    <string name="user_guide">User guide</string>
     <string name="check_updates">Check for updates</string>
     <string name="checking_updates">Checking for updates…</string>
     <string name="update_up_to_date">You\'re on the latest version (v%1$s).</string>

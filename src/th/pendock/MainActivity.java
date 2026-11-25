@@ -53,6 +53,14 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public class MainActivity extends Activity {
+    static final String EXTRA_START_TOUR = "start_tour";
+    static final String EXTRA_TOUR_THAI = "tour_thai";
+
+    private FrameLayout root;
+    private MainTourOverlay tourOverlay;
+    private View tourPowerButton, tourAddAppButton, tourPenControlsCard, tourAppearanceCard;
+    private int pendingTourStep = -1;
+    private boolean pendingTourThai;
     private LinearLayout headerActions, content, previewPanel, exclusionsSection, permissionsSection;
     private FrameLayout previewScene;
     private PreviewWallpaper previewWallpaper;
@@ -140,7 +148,45 @@ public class MainActivity extends Activity {
         permissionsSection = Ui.column(this);
         addSection(rightColumn, permissionsSection, 18);
 
-        setContentView(scroll);
+        root = new FrameLayout(this);
+        root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(root);
+
+        if (state != null && state.getInt("tour_step", -1) >= 0) {
+            pendingTourStep = state.getInt("tour_step", -1);
+            pendingTourThai = state.getBoolean("tour_thai", "th".equals(Appearance.language(this)));
+        } else {
+            consumeTourIntent(getIntent());
+        }
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        consumeTourIntent(intent);
+    }
+
+    private void consumeTourIntent(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(EXTRA_START_TOUR, false)) return;
+        pendingTourStep = 0;
+        pendingTourThai = intent.getBooleanExtra(EXTRA_TOUR_THAI, "th".equals(Appearance.language(this)));
+        intent.removeExtra(EXTRA_START_TOUR);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (tourOverlay != null) {
+            outState.putInt("tour_step", tourOverlay.currentStep());
+            outState.putBoolean("tour_thai", tourOverlay.isThai());
+        }
+    }
+
+    @Override public void onBackPressed() {
+        if (tourOverlay != null) {
+            tourOverlay.dismiss();
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override protected void onStart() {
@@ -154,7 +200,16 @@ public class MainActivity extends Activity {
             recreate();
             return;
         }
+        if (DockService.isEnabled(this) && !DockService.running && Settings.canDrawOverlays(this)) {
+            DockService.start(this);
+        }
         render();
+        if (pendingTourStep >= 0) {
+            int step = pendingTourStep;
+            boolean useThai = pendingTourThai;
+            pendingTourStep = -1;
+            root.post(() -> startTour(step, useThai));
+        }
     }
 
     @Override protected void onStop() {
@@ -173,6 +228,14 @@ public class MainActivity extends Activity {
     }
 
     private void render() {
+        int activeTourStep = -1;
+        boolean activeTourThai = "th".equals(Appearance.language(this));
+        if (tourOverlay != null) {
+            activeTourStep = tourOverlay.currentStep();
+            activeTourThai = tourOverlay.isThai();
+            root.removeView(tourOverlay);
+            tourOverlay = null;
+        }
         content.removeAllViews();
         exclusionsSection.removeAllViews();
         permissionsSection.removeAllViews();
@@ -182,6 +245,11 @@ public class MainActivity extends Activity {
         renderPreview();
         addSection(exclusionsSection, renderExclusions(), 0);
         addSection(permissionsSection, renderPermissions(), 0);
+        if (activeTourStep >= 0) {
+            int step = activeTourStep;
+            boolean useThai = activeTourThai;
+            root.post(() -> startTour(step, useThai));
+        }
     }
 
     private void renderHeader() {
@@ -191,11 +259,98 @@ public class MainActivity extends Activity {
         dock.setTooltipText(getString(dockAction));
         dock.setImageTintList(ColorStateList.valueOf(dockStatusStroke()));
         dock.setBackground(Ui.pressable(this, dockStatusFill(), 12, dockStatusStroke()));
+        tourPowerButton = dock;
         headerActions.addView(dock, new LinearLayout.LayoutParams(dp(60), dp(48)));
+        LinearLayout.LayoutParams guideParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        guideParams.setMarginStart(dp(8));
+        ImageButton guide = Ui.iconAction(this, R.drawable.ic_guide, R.string.user_guide,
+                () -> startTour(0, "th".equals(Appearance.language(this))));
+        guide.setTooltipText(getString(R.string.user_guide));
+        headerActions.addView(guide, guideParams);
         LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         settingsParams.setMarginStart(dp(8));
         headerActions.addView(Ui.iconAction(this, R.drawable.ic_settings, R.string.settings,
                 () -> startActivity(new Intent(this, SettingsActivity.class))), settingsParams);
+    }
+
+    private void startTour(int startStep, boolean startThai) {
+        if (root == null || isFinishing() || isDestroyed()) return;
+        if (tourOverlay != null) {
+            root.removeView(tourOverlay);
+            tourOverlay = null;
+        }
+        List<MainTourOverlay.Step> steps = new ArrayList<>();
+        if (tourPowerButton != null) {
+            steps.add(new MainTourOverlay.Step(
+                    tourPowerButton,
+                    "1. เปิด / ปิดวงเมนู PenDock",
+                    "แตะปุ่มนี้เพื่อเริ่มหรือหยุดการทำงานของวงเมนู (หรือสลับจากปุ่ม PenDock ใน Quick Settings) เมื่อเปิดแล้วให้ถือ M-Pencil ใกล้จอและแตะด้านข้างปากกา 2 ครั้งเพื่อเรียกวงเมนูได้จากทุกหน้าจอ",
+                    "1. Turn PenDock On / Off",
+                    "Tap here to start or stop the shortcut ring (or toggle PenDock from Quick Settings). Once on, hold M-Pencil near the screen and double-tap its side anywhere to summon the ring.",
+                    true));
+        }
+        if (tourAddAppButton != null) {
+            steps.add(new MainTourOverlay.Step(
+                    tourAddAppButton,
+                    "2. เพิ่มแอพและเครื่องมือลงวงเมนู",
+                    "แตะปุ่มนี้เพื่อติ๊กเลือกแอพและเครื่องมือเสริม (Circle to Search, ภาพหน้าจอ, เลเซอร์พอยเตอร์, ปุ่มโฮม/ย้อนกลับ) ได้สูงสุด 10 รายการ และกดค้างที่แถวเพื่อลากจัดลำดับได้ทันที",
+                    "2. Add Apps & Built-in Tools",
+                    "Tap here to check or uncheck up to 10 apps and built-in tools (Circle to Search, Screenshot, Laser Pointer, Home/Back). Press and hold any row to drag-reorder."));
+        }
+        if (previewScene != null) {
+            steps.add(new MainTourOverlay.Step(
+                    previewScene,
+                    "3. พรีวิววงเมนูแบบเรียลไทม์",
+                    "ดูหน้าตาวงเมนูจริงพร้อมลองจ่อปากกาหรือแตะทดสอบได้ทันที ทุกการเพิ่ม ลบ ลากเรียงลำดับ หรือเปลี่ยนสไตล์จะอัปเดตให้เห็นบนพื้นที่นี้สดๆ",
+                    "3. Live Interactive Ring Preview",
+                    "Test hovering and tapping your ring right here. Every added shortcut, drag-reorder, or style tweak updates this live preview immediately."));
+        }
+        if (tourAppearanceCard != null) {
+            steps.add(new MainTourOverlay.Step(
+                    tourAppearanceCard,
+                    "4. ปรับแต่งหน้าตาวงเมนู",
+                    "เลือกสไตล์วงเมนูได้ 6 แบบ ตั้งธีมวงเมนู (สว่าง/มืด) แยกจากธีมแอพ เลือกสีวงเมนู ขนาดวง ความมืดฉากหลัง (Dim) และความเบลอพื้นหลัง (Blur) ตามชอบ",
+                    "4. Ring Appearance",
+                    "Pick from 6 ring styles, set a Ring theme independently from the app theme, choose a Ring color, and adjust ring size, background dimming, and live backdrop blur."));
+        }
+        if (tourPenControlsCard != null) {
+            steps.add(new MainTourOverlay.Step(
+                    tourPenControlsCard,
+                    "5. การควบคุมปากกา & รูปแบบการเปิดแอพ",
+                    "เลือกได้ว่าต้องใช้ปลายปากกาเท่านั้นหรือแตะด้วยนิ้วได้ ต้องจ่อใกล้จอหรือไม่ เปิดอัตโนมัติตอนเปิดเครื่อง และตั้งค่าการเปิดแอพเป็น หน้าต่างลอย (Floating), แบ่งหน้าจอ (Split screen) หรือ เต็มจอ",
+                    "5. Pen Controls & Launch Mode",
+                    "Configure pen-only vs touch input, near-screen trigger, auto-start on boot, and choose whether shortcuts open in Floating window, Split screen, or Full screen."));
+        }
+        if (exclusionsSection != null) {
+            steps.add(new MainTourOverlay.Step(
+                    exclusionsSection,
+                    "6. แอพที่ยกเว้น (Excluded apps)",
+                    "ใส่แอพวาดรูปหรือจดโน้ตอย่าง GoPaint หรือ Notes ไว้ตรงนี้ เพื่อให้การแตะด้านข้างปากกา 2 ครั้งยังคงสลับยางลบ/ปากกาของแอพนั้นตามปกติโดยไม่เปิด PenDock ทับ",
+                    "6. Excluded Apps",
+                    "Add drawing or note apps like GoPaint or Notes here so double-tapping M-Pencil keeps switching to the eraser inside those apps instead of opening PenDock."));
+        }
+        if (permissionsSection != null) {
+            steps.add(new MainTourOverlay.Step(
+                    permissionsSection,
+                    "7. สิทธิ์การใช้งานที่จำเป็น",
+                    "เปิดสิทธิ์ แสดงทับแอพอื่น และบริการ Accessibility ที่จำเป็นในส่วนนี้เพื่อให้วงเมนู, ภาพหน้าจอ, Circle to Search และโหมดหน้าต่างลอย/แบ่งหน้าจอทำงานได้สมบูรณ์ (ส่วนธีม ภาษา และเช็กอัปเดตอยู่ที่ไอคอนฟันเฟืองมุมขวาบน)",
+                    "7. Permissions & Settings",
+                    "Enable Display over other apps and the Accessibility services here so the ring, Screenshot, Circle to Search, and floating/split modes work smoothly. Use the gear icon at the top right for theme, language, and updates."));
+        }
+        if (steps.isEmpty()) return;
+        tourOverlay = new MainTourOverlay(this, scroll, steps, startThai, startStep,
+                () -> {
+                    Intent guideIntent = new Intent(this, GuideActivity.class);
+                    guideIntent.putExtra("guide_thai", tourOverlay != null ? tourOverlay.isThai() : startThai);
+                    startActivity(guideIntent);
+                },
+                () -> {
+                    if (tourOverlay != null && root != null) {
+                        root.removeView(tourOverlay);
+                        tourOverlay = null;
+                    }
+                });
+        root.addView(tourOverlay, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private int dockStatusStroke() {
@@ -224,7 +379,9 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
         titleParams.setMarginEnd(dp(10));
         heading.addView(headingSpace, titleParams);
-        heading.addView(Ui.action(this, getString(R.string.add_app), false, this::pickApp));
+        TextView addBtn = Ui.action(this, getString(R.string.add_app), false, this::pickApp);
+        tourAddAppButton = addBtn;
+        heading.addView(addBtn);
         add(heading, 0);
         if (selected.isEmpty()) {
             add(Ui.text(this, getString(R.string.empty_ring), 14, colors.muted, false), 12);
@@ -237,6 +394,7 @@ public class MainActivity extends Activity {
 
         add(Ui.text(this, getString(R.string.pen_controls), 16, colors.text, true), 19);
         LinearLayout pen = card();
+        tourPenControlsCard = pen;
         LinearLayout penChoice = Ui.column(this);
         Switch penOnly = featureSwitch(R.string.pen_only, PenInput.isPenOnlyMenu(this));
         penChoice.addView(penOnly, new LinearLayout.LayoutParams(-1, -2));
@@ -924,6 +1082,7 @@ public class MainActivity extends Activity {
 
         addSection(previewPanel, Ui.text(this, getString(R.string.ring_appearance), 16, colors.text, true), 18);
         LinearLayout appearance = card();
+        tourAppearanceCard = appearance;
         addRow(appearance, choiceRow(R.string.ring_style, RingConfig.ringStyle(this),
                 new int[] {R.string.style_petals, R.string.style_orbit, R.string.style_halo,
                         R.string.style_hexa, R.string.style_dial, R.string.style_minimal},
@@ -933,6 +1092,14 @@ public class MainActivity extends Activity {
                     RingConfig.setRingStyle(this, style);
                     refreshPreview(shortcuts.selected());
                 }));
+        addRow(appearance, choiceRow(R.string.ring_theme, RingConfig.ringTheme(this),
+                new int[] {R.string.ring_theme_app, R.string.theme_light, R.string.theme_dark},
+                new String[] {RingConfig.THEME_APP, RingConfig.THEME_LIGHT, RingConfig.THEME_DARK},
+                theme -> {
+                    RingConfig.setRingTheme(this, theme);
+                    refreshPreview(shortcuts.selected());
+                }));
+        addRow(appearance, ringColorRow());
         addRow(appearance, choiceRow(R.string.ring_size, RingConfig.ringSize(this),
                 new int[] {R.string.size_small, R.string.size_normal, R.string.size_large},
                 new String[] {RingConfig.SIZE_SMALL, RingConfig.SIZE_NORMAL, RingConfig.SIZE_LARGE},
@@ -943,6 +1110,82 @@ public class MainActivity extends Activity {
         addRow(appearance, dimSliderRow());
         if (Build.VERSION.SDK_INT >= 31) addRow(appearance, blurSliderRow());
         addSection(previewPanel, appearance, 8);
+    }
+
+    private LinearLayout ringColorRow() {
+        int[] labels = {
+                R.string.color_default, R.string.color_ocean, R.string.color_teal, R.string.color_violet,
+                R.string.color_rose, R.string.color_amber, R.string.color_coral, R.string.color_graphite
+        };
+        String[] values = RingConfig.COLOR_VALUES;
+        String[] active = {RingConfig.ringColor(this)};
+
+        LinearLayout row = Ui.column(this);
+        row.setPadding(0, dp(10), 0, dp(12));
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(Ui.text(this, getString(R.string.ring_color), 14, colors.text, false),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        TextView activeLabel = Ui.text(this, "", 13, colors.accent, true);
+        header.addView(activeLabel);
+        row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout swatches = new LinearLayout(this);
+        swatches.setGravity(Gravity.CENTER_VERTICAL);
+        swatches.setPadding(dp(2), dp(8), dp(2), dp(2));
+
+        FrameLayout[] buttons = new FrameLayout[values.length];
+        View[] dots = new View[values.length];
+        Runnable[] update = new Runnable[1];
+        update[0] = () -> {
+            for (int i = 0; i < values.length; i++) {
+                boolean selected = values[i].equals(active[0]);
+                int swatch = RingConfig.ringSwatchColor(values[i], colors.dark);
+                buttons[i].setBackground(Ui.border(this,
+                        selected ? colors.accentWash : Color.TRANSPARENT, 20,
+                        selected ? swatch : Color.TRANSPARENT));
+                buttons[i].setSelected(selected);
+                dots[i].setBackground(Ui.border(this, swatch, 14,
+                        selected ? colors.surface : withAlpha(colors.text, 0x26)));
+                if (selected) {
+                    activeLabel.setText(getString(labels[i]));
+                    activeLabel.setTextColor(swatch);
+                }
+            }
+        };
+
+        for (int i = 0; i < values.length; i++) {
+            String value = values[i];
+            FrameLayout cell = new FrameLayout(this);
+            cell.setContentDescription(getString(labels[i]));
+            cell.setTooltipText(getString(labels[i]));
+            cell.setFocusable(true);
+            View dot = new View(this);
+            cell.addView(dot, new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER));
+            cell.setOnClickListener(view -> {
+                if (value.equals(active[0])) return;
+                active[0] = value;
+                RingConfig.setRingColor(this, value);
+                update[0].run();
+                refreshPreview(shortcuts.selected());
+            });
+            LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+            if (i > 0) cellParams.setMarginStart(dp(6));
+            swatches.addView(cell, cellParams);
+            buttons[i] = cell;
+            dots[i] = dot;
+        }
+        update[0].run();
+
+        android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.addView(swatches, new FrameLayout.LayoutParams(-2, -2));
+        row.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+        return row;
+    }
+
+    private static int withAlpha(int color, int alpha) {
+        return (color & 0x00ffffff) | ((alpha & 255) << 24);
     }
 
     private void refreshPreview(List<Shortcuts.Entry> selected) {

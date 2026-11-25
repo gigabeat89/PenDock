@@ -110,7 +110,7 @@ final class RadialMenu extends FrameLayout {
         maxScale = RingConfig.ringScale(context);
         style = RingConfig.ringStyle(context);
         dimAlpha = RingConfig.ringDimAlpha(context);
-        colors = Ui.colors(context);
+        colors = Appearance.ringPalette(context);
         this.fallbackX = fallbackX;
         this.fallbackY = fallbackY;
         this.close = close;
@@ -798,7 +798,9 @@ final class RadialMenu extends FrameLayout {
                         : colors.petalDisabled);
                 canvas.drawPath(segment, paint);
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setColor(colors.ringBorder);
+                paint.setColor(selected > 0.01f
+                        ? blendArgb(colors.ringBorder, withAlpha(colors.accent, 210), selected)
+                        : colors.ringBorder);
                 canvas.drawPath(segment, paint);
                 canvas.restoreToCount(segmentSave);
             }
@@ -891,13 +893,13 @@ final class RadialMenu extends FrameLayout {
 
                 // Translucent frosted glass donut fill (~45% opacity so background shines through).
                 paint.setStrokeWidth(trackThickness);
-                paint.setColor(colors.dark ? 0x6c1b263d : 0x76ffffff);
+                paint.setColor(colors.glassFill);
                 canvas.drawCircle(middle, middle, midR, paint);
 
                 // Subtle top-to-bottom glass specular sheen for real liquid-glass depth.
                 Shader glassSheen = new android.graphics.LinearGradient(
                         middle, middle - outerR, middle, middle + outerR,
-                        colors.dark ? new int[] {0x32ffffff, 0x06ffffff, 0x1c9cb8ff}
+                        colors.dark ? new int[] {0x32ffffff, 0x06ffffff, colors.glassSheenAccent}
                                 : new int[] {0x60ffffff, 0x0cffffff, 0x30ffffff},
                         new float[] {0f, 0.52f, 1f}, Shader.TileMode.CLAMP);
                 paint.setShader(glassSheen);
@@ -918,8 +920,7 @@ final class RadialMenu extends FrameLayout {
 
                     buildAnnularSlice(slicePath, middle, middle, sliceIn, sliceOut, startDeg, sweep);
                     paint.setStyle(Paint.Style.FILL);
-                    int sliceTint = colors.dark ? 0xff7da2ff : 0xffffffff;
-                    paint.setColor(withAlpha(sliceTint, Math.round((colors.dark ? 92f : 148f) * selected)));
+                    paint.setColor(withAlpha(colors.glassSlice, Math.round((colors.dark ? 96f : 152f) * selected)));
                     canvas.drawPath(slicePath, paint);
 
                     // Crisp outer rim accent indicator arc within the exact same slice.
@@ -938,22 +939,22 @@ final class RadialMenu extends FrameLayout {
                 paint.setColor(colors.dark ? 0x52ffffff : 0xd8ffffff);
                 canvas.drawCircle(middle, middle, outerR - dp(0.8f) * scale, paint);
                 canvas.drawCircle(middle, middle, innerR + dp(0.8f) * scale, paint);
-                paint.setStrokeWidth(Math.max(1f, dp(0.9f) * scale));
-                paint.setColor(colors.dark ? 0x448ba2cc : 0x261b2440);
+                paint.setStrokeWidth(Math.max(1f, dp(0.95f) * scale));
+                paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 110 : 72));
                 canvas.drawCircle(middle, middle, outerR + dp(0.3f) * scale, paint);
                 canvas.drawCircle(middle, middle, innerR - dp(0.3f) * scale, paint);
             }
 
             // Matching frosted translucent center hub (legible yet airy).
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(colors.dark ? 0x8c182238 : 0x9cffffff);
+            paint.setColor(colors.glassHub);
             canvas.drawCircle(middle, middle, hubRadius, paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(Math.max(1.1f, dp(1.2f) * scale));
             paint.setColor(colors.dark ? 0x58ffffff : 0xd8ffffff);
             canvas.drawCircle(middle, middle, hubRadius - dp(0.7f) * scale, paint);
-            paint.setStrokeWidth(Math.max(1f, dp(0.9f) * scale));
-            paint.setColor(colors.dark ? 0x448ba2cc : 0x261b2440);
+            paint.setStrokeWidth(Math.max(1f, dp(0.95f) * scale));
+            paint.setColor(withAlpha(colors.ringBorder, colors.dark ? 110 : 72));
             canvas.drawCircle(middle, middle, hubRadius + dp(0.3f) * scale, paint);
         }
 

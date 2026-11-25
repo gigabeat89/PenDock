@@ -15,6 +15,23 @@ final class RingConfig {
     static final String STYLE_DIAL = "dial";
     static final String STYLE_MINIMAL = "minimal";
 
+    static final String THEME_APP = "app";
+    static final String THEME_LIGHT = "light";
+    static final String THEME_DARK = "dark";
+
+    static final String COLOR_DEFAULT = "default";
+    static final String COLOR_OCEAN = "ocean";
+    static final String COLOR_TEAL = "teal";
+    static final String COLOR_VIOLET = "violet";
+    static final String COLOR_ROSE = "rose";
+    static final String COLOR_AMBER = "amber";
+    static final String COLOR_CORAL = "coral";
+    static final String COLOR_GRAPHITE = "graphite";
+    static final String[] COLOR_VALUES = {
+            COLOR_DEFAULT, COLOR_OCEAN, COLOR_TEAL, COLOR_VIOLET,
+            COLOR_ROSE, COLOR_AMBER, COLOR_CORAL, COLOR_GRAPHITE
+    };
+
     static final String LAUNCH_FLOATING = "floating";
     static final String LAUNCH_SPLIT = "split";
     static final String LAUNCH_FULLSCREEN = "fullscreen";
@@ -25,6 +42,8 @@ final class RingConfig {
 
     private static final String RING_SIZE = "ring_size";
     private static final String RING_STYLE = "ring_style";
+    private static final String RING_THEME = "ring_theme";
+    private static final String RING_COLOR = "ring_color";
     private static final String RING_DIM = "ring_dim_percent";
     private static final String RING_BLUR = "ring_blur_dp";
     private static final String LAUNCH_MODE = "launch_mode";
@@ -34,7 +53,7 @@ final class RingConfig {
     private static final String CIRCLE_COPY = "circle_show_copy";
     private static final String CIRCLE_SAVE = "circle_show_save";
     static final int MAX_DIM_PERCENT = 70;
-    static final int MAX_BLUR_DP = 24;
+    static final int MAX_BLUR_DP = 40;
 
     private RingConfig() { }
 
@@ -71,6 +90,69 @@ final class RingConfig {
 
     static void setRingStyle(Context context, String style) {
         prefs(context).edit().putString(RING_STYLE, style).apply();
+    }
+
+    static String ringTheme(Context context) {
+        String value = prefs(context).getString(RING_THEME, THEME_APP);
+        if (THEME_LIGHT.equals(value) || THEME_DARK.equals(value)) return value;
+        return THEME_APP;
+    }
+
+    static void setRingTheme(Context context, String theme) {
+        prefs(context).edit().putString(RING_THEME, theme).apply();
+    }
+
+    static boolean isRingDark(Context context) {
+        String mode = ringTheme(context);
+        if (THEME_DARK.equals(mode)) return true;
+        if (THEME_LIGHT.equals(mode)) return false;
+        String appTheme = Appearance.theme(context);
+        if (Appearance.DARK.equals(appTheme)) return true;
+        if (Appearance.LIGHT.equals(appTheme)) return false;
+        Context app = context.getApplicationContext();
+        int uiMode = (app == null ? context.getResources().getConfiguration()
+                : app.getResources().getConfiguration()).uiMode;
+        return (uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    static String ringColor(Context context) {
+        String value = prefs(context).getString(RING_COLOR, COLOR_DEFAULT);
+        for (String valid : COLOR_VALUES) {
+            if (valid.equals(value)) return value;
+        }
+        return COLOR_DEFAULT;
+    }
+
+    static void setRingColor(Context context, String color) {
+        prefs(context).edit().putString(RING_COLOR, color).apply();
+    }
+
+    static int ringAccentLight(String color) {
+        if (COLOR_OCEAN.equals(color)) return 0xff0070e0;
+        if (COLOR_TEAL.equals(color)) return 0xff0d9488;
+        if (COLOR_VIOLET.equals(color)) return 0xff7c3aed;
+        if (COLOR_ROSE.equals(color)) return 0xffe11d6d;
+        if (COLOR_AMBER.equals(color)) return 0xffd97706;
+        if (COLOR_CORAL.equals(color)) return 0xffea580c;
+        if (COLOR_GRAPHITE.equals(color)) return 0xff3b4454;
+        return 0xff3454d1;
+    }
+
+    static int ringAccentDark(String color) {
+        if (COLOR_OCEAN.equals(color)) return 0xff6cb8ff;
+        if (COLOR_TEAL.equals(color)) return 0xff5eead4;
+        if (COLOR_VIOLET.equals(color)) return 0xffc4b5fd;
+        if (COLOR_ROSE.equals(color)) return 0xfffda4af;
+        if (COLOR_AMBER.equals(color)) return 0xfffcd34d;
+        if (COLOR_CORAL.equals(color)) return 0xfffdba74;
+        if (COLOR_GRAPHITE.equals(color)) return 0xffd8e0ec;
+        return 0xffaabaff;
+    }
+
+    static int ringSwatchColor(String color, boolean dark) {
+        if (COLOR_GRAPHITE.equals(color)) return dark ? 0xff94a3b8 : 0xff475569;
+        return dark ? ringAccentDark(color) : ringAccentLight(color);
     }
 
     static int ringDimPercent(Context context) {
