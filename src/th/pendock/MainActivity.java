@@ -55,12 +55,23 @@ import java.util.function.Supplier;
 public class MainActivity extends Activity {
     static final String EXTRA_START_TOUR = "start_tour";
     static final String EXTRA_TOUR_THAI = "tour_thai";
+    static final String EXTRA_FOCUS_PERMISSION = "focus_permission";
+    static final String EXTRA_FOCUS_TOOL = "focus_tool";
+    static final String PERM_OVERLAY = "overlay";
+    static final String PERM_SYSTEM_ACTIONS = "system_actions";
+    static final String PERM_WINDOW = "window";
+    static final String PERM_CIRCLE = "circle";
+    private static final String PREF_FIRST_TOUR_SHOWN = "first_tour_shown";
 
     private FrameLayout root;
     private MainTourOverlay tourOverlay;
     private View tourPowerButton, tourAddAppButton, tourPenControlsCard, tourAppearanceCard;
+    private View tourOverlayRow, tourSystemActionsRow, tourWindowRow, tourCircleRow;
     private int pendingTourStep = -1;
     private boolean pendingTourThai;
+    private String focusedPermission;
+    private String focusedTool;
+    private boolean pendingPermissionFocus;
     private LinearLayout headerActions, content, previewPanel, exclusionsSection, permissionsSection;
     private FrameLayout previewScene;
     private PreviewWallpaper previewWallpaper;
@@ -167,7 +178,17 @@ public class MainActivity extends Activity {
     }
 
     private void consumeTourIntent(Intent intent) {
-        if (intent == null || !intent.getBooleanExtra(EXTRA_START_TOUR, false)) return;
+        if (intent == null) return;
+        String perm = intent.getStringExtra(EXTRA_FOCUS_PERMISSION);
+        if (perm != null && !perm.isEmpty()) {
+            focusedPermission = perm;
+            focusedTool = intent.getStringExtra(EXTRA_FOCUS_TOOL);
+            pendingPermissionFocus = true;
+            intent.removeExtra(EXTRA_FOCUS_PERMISSION);
+            intent.removeExtra(EXTRA_FOCUS_TOOL);
+            return;
+        }
+        if (!intent.getBooleanExtra(EXTRA_START_TOUR, false)) return;
         pendingTourStep = 0;
         pendingTourThai = intent.getBooleanExtra(EXTRA_TOUR_THAI, "th".equals(Appearance.language(this)));
         intent.removeExtra(EXTRA_START_TOUR);
@@ -200,16 +221,144 @@ public class MainActivity extends Activity {
             recreate();
             return;
         }
-        if (DockService.isEnabled(this) && !DockService.running && Settings.canDrawOverlays(this)) {
-            DockService.start(this);
+        autoStartDockIfAllowed();
+        if (focusedPermission != null && isPermissionGranted(focusedPermission)) {
+            focusedPermission = null;
+            focusedTool = null;
+            pendingPermissionFocus = false;
+            if (tourOverlay != null) {
+                root.removeView(tourOverlay);
+                tourOverlay = null;
+            }
         }
         render();
-        if (pendingTourStep >= 0) {
+        if (pendingPermissionFocus && focusedPermission != null) {
+            pendingPermissionFocus = false;
+            boolean useThai = "th".equals(Appearance.language(this));
+            root.post(() -> startPermissionFocusGuide(focusedPermission, focusedTool, useThai));
+        } else if (pendingTourStep >= 0) {
             int step = pendingTourStep;
             boolean useThai = pendingTourThai;
             pendingTourStep = -1;
             root.post(() -> startTour(step, useThai));
+        } else if (tourOverlay == null && hasMissingPermissions() && !hasShownFirstTour()) {
+            markFirstTourShown();
+            boolean useThai = "th".equals(Appearance.language(this));
+            root.post(() -> startTour(0, useThai));
         }
+    }
+
+    private boolean isPermissionGranted(String permKey) {
+        if (PERM_OVERLAY.equals(permKey)) return Settings.canDrawOverlays(this);
+        if (PERM_SYSTEM_ACTIONS.equals(permKey)) return SystemScreenshot.isReady();
+        if (PERM_WINDOW.equals(permKey)) return WindowModeMonitor.isReady();
+        if (PERM_CIRCLE.equals(permKey)) return Build.VERSION.SDK_INT < 30 || CircleCaptureService.isReady();
+        return true;
+    }
+
+    private void startPermissionFocusGuide(String permKey, String toolKey, boolean useThai) {
+        if (root == null || isFinishing() || isDestroyed() || permKey == null) return;
+        if (isPermissionGranted(permKey)) return;
+        View target = permissionRowForKey(permKey);
+        if (target == null) target = permissionsSection;
+        if (target == null) return;
+        if (tourOverlay != null) {
+            root.removeView(tourOverlay);
+            tourOverlay = null;
+        }
+        String titleTh;
+        String bodyTh;
+        String titleEn;
+        String bodyEn;
+        if (PERM_CIRCLE.equals(permKey)) {
+            boolean isTranslate = "translate".equals(toolKey);
+            titleTh = isTranslate
+                    ? "ต้องเปิดสิทธิ์สำหรับ \"แปลหน้าจอ\""
+                    : "ต้องเปิดสิทธิ์สำหรับ \"Circle to Search\"";
+            bodyTh = isTranslate
+                    ? "เครื่องมือ แปลหน้าจอ ต้องใช้บริการ Accessibility สำหรับจับภาพหน้าจอ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิด \"PenDock Screen Capture\" ได้เลย"
+                    : "เครื่องมือ Circle to Search ต้องใช้บริการ Accessibility สำหรับจับภาพหน้าจอ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิด \"PenDock Screen Capture\" ได้เลย";
+            titleEn = isTranslate
+                    ? "Permission Required for Screen Translate"
+                    : "Permission Required for Circle to Search";
+            bodyEn = isTranslate
+                    ? "Screen Translate needs the screen-capture Accessibility service. Tap Grant access inside the highlighted row and enable \"PenDock Screen Capture\"."
+                    : "Circle to Search needs the screen-capture Accessibility service. Tap Grant access inside the highlighted row and enable \"PenDock Screen Capture\".";
+        } else if (PERM_SYSTEM_ACTIONS.equals(permKey)) {
+            boolean isLock = "lock".equals(toolKey);
+            titleTh = isLock
+                    ? "ต้องเปิดสิทธิ์สำหรับ \"ล็อกหน้าจอ\""
+                    : "ต้องเปิดสิทธิ์สำหรับ \"จับภาพหน้าจอ\"";
+            bodyTh = isLock
+                    ? "เครื่องมือ ล็อกหน้าจอ ต้องใช้บริการ Accessibility สำหรับคำสั่งระบบ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิดบริการของ PenDock ได้เลย"
+                    : "เครื่องมือ จับภาพหน้าจอ ต้องใช้บริการ Accessibility สำหรับคำสั่งระบบ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิดบริการของ PenDock ได้เลย";
+            titleEn = isLock
+                    ? "Permission Required for Lock Screen"
+                    : "Permission Required for Screenshot";
+            bodyEn = isLock
+                    ? "Lock Screen needs the System Actions Accessibility service. Tap Grant access inside the highlighted row and enable it."
+                    : "Screenshot needs the System Actions Accessibility service. Tap Grant access inside the highlighted row and enable it.";
+        } else if (PERM_WINDOW.equals(permKey)) {
+            titleTh = "ต้องเปิดสิทธิ์สำหรับหน้าต่างลอย / แบ่งหน้าจอ";
+            bodyTh = "กดปุ่ม Grant access ในกรอบสีแดงนี้เพื่อเปิดบริการ Accessibility สำหรับตรวจจับหน้าต่างลอยและแบ่งหน้าจอ";
+            titleEn = "Permission Required for Window Tracking";
+            bodyEn = "Tap Grant access inside the highlighted row to enable the window-tracking Accessibility service.";
+        } else {
+            titleTh = "ต้องเปิดสิทธิ์ \"แสดงทับแอพอื่น\" ก่อน (จำเป็น)";
+            bodyTh = "จำเป็นต้องเปิดสิทธิ์นี้ ไม่งั้นวงเมนู PenDock จะไม่สามารถใช้งานได้ กดปุ่ม Grant access ในกรอบสีแดงนี้ได้เลย";
+            titleEn = "Grant \"Display over other apps\" First (Required)";
+            bodyEn = "PenDock cannot open or work without this permission. Tap Grant access inside the highlighted row.";
+        }
+        List<MainTourOverlay.Step> single = Collections.singletonList(
+                new MainTourOverlay.Step(target, titleTh, bodyTh, titleEn, bodyEn, false, true));
+        tourOverlay = new MainTourOverlay(this, scroll, single, useThai, 0,
+                () -> {
+                    Intent guideIntent = new Intent(this, GuideActivity.class);
+                    guideIntent.putExtra("guide_thai", tourOverlay != null ? tourOverlay.isThai() : useThai);
+                    startActivity(guideIntent);
+                },
+                () -> {
+                    if (tourOverlay != null && root != null) {
+                        root.removeView(tourOverlay);
+                        tourOverlay = null;
+                    }
+                    if (focusedPermission != null) {
+                        focusedPermission = null;
+                        focusedTool = null;
+                        render();
+                    }
+                });
+        root.addView(tourOverlay, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private View permissionRowForKey(String permKey) {
+        if (PERM_OVERLAY.equals(permKey)) return tourOverlayRow;
+        if (PERM_SYSTEM_ACTIONS.equals(permKey)) return tourSystemActionsRow;
+        if (PERM_WINDOW.equals(permKey)) return tourWindowRow;
+        if (PERM_CIRCLE.equals(permKey)) return tourCircleRow;
+        return null;
+    }
+
+    private void autoStartDockIfAllowed() {
+        if (DockService.isEnabled(this) && !DockService.running && Settings.canDrawOverlays(this)) {
+            DockService.start(this);
+        }
+    }
+
+    private boolean hasMissingPermissions() {
+        boolean overlay = Settings.canDrawOverlays(this);
+        boolean screenshot = SystemScreenshot.isReady();
+        boolean window = WindowModeMonitor.isReady();
+        boolean circleOk = Build.VERSION.SDK_INT < 30 || CircleCaptureService.isReady();
+        return !(overlay && screenshot && window && circleOk);
+    }
+
+    private boolean hasShownFirstTour() {
+        return getSharedPreferences("tools", MODE_PRIVATE).getBoolean(PREF_FIRST_TOUR_SHOWN, false);
+    }
+
+    private void markFirstTourShown() {
+        getSharedPreferences("tools", MODE_PRIVATE).edit().putBoolean(PREF_FIRST_TOUR_SHOWN, true).apply();
     }
 
     @Override protected void onStop() {
@@ -224,7 +373,11 @@ public class MainActivity extends Activity {
 
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
-        if (focused && content != null && menuStatus != DockService.running) render();
+        if (focused) {
+            autoStartDockIfAllowed();
+            boolean effective = DockService.running || (DockService.isEnabled(this) && Settings.canDrawOverlays(this));
+            if (content != null && menuStatus != effective) render();
+        }
     }
 
     private void render() {
@@ -239,7 +392,7 @@ public class MainActivity extends Activity {
         content.removeAllViews();
         exclusionsSection.removeAllViews();
         permissionsSection.removeAllViews();
-        menuStatus = DockService.running;
+        menuStatus = DockService.running || (DockService.isEnabled(this) && Settings.canDrawOverlays(this));
         renderHeader();
         renderMenuSettings();
         renderPreview();
@@ -280,62 +433,67 @@ public class MainActivity extends Activity {
             tourOverlay = null;
         }
         List<MainTourOverlay.Step> steps = new ArrayList<>();
+        boolean prioritizePermissions = hasMissingPermissions();
+        if (prioritizePermissions && permissionsSection != null) {
+            steps.add(buildPermissionsTourStep(1, true));
+        }
         if (tourPowerButton != null) {
+            int n = steps.size() + 1;
             steps.add(new MainTourOverlay.Step(
                     tourPowerButton,
-                    "1. เปิด / ปิดวงเมนู PenDock",
-                    "แตะปุ่มนี้เพื่อเริ่มหรือหยุดการทำงานของวงเมนู (หรือสลับจากปุ่ม PenDock ใน Quick Settings) เมื่อเปิดแล้วให้ถือ M-Pencil ใกล้จอและแตะด้านข้างปากกา 2 ครั้งเพื่อเรียกวงเมนูได้จากทุกหน้าจอ",
-                    "1. Turn PenDock On / Off",
-                    "Tap here to start or stop the shortcut ring (or toggle PenDock from Quick Settings). Once on, hold M-Pencil near the screen and double-tap its side anywhere to summon the ring.",
+                    n + ". เปิด / ปิดวงเมนู PenDock",
+                    "วงเมนูจะเริ่มทำงานอัตโนมัติทันทีที่เปิดสิทธิ์แสดงทับแอพอื่น และแตะปุ่มนี้เพื่อเปิดหรือหยุดได้ทุกเมื่อ (หรือสลับจาก Quick Settings) เมื่อเปิดแล้วให้ถือ M-Pencil ใกล้จอและแตะด้านข้างปากกา 2 ครั้งเพื่อเรียกวงเมนูได้จากทุกหน้าจอ",
+                    n + ". Turn PenDock On / Off",
+                    "PenDock starts automatically once Display over other apps is granted. Tap here anytime to pause or resume (or use Quick Settings), then hold M-Pencil near the screen and double-tap its side anywhere to summon the ring.",
                     true));
         }
         if (tourAddAppButton != null) {
+            int n = steps.size() + 1;
             steps.add(new MainTourOverlay.Step(
                     tourAddAppButton,
-                    "2. เพิ่มแอพและเครื่องมือลงวงเมนู",
-                    "แตะปุ่มนี้เพื่อติ๊กเลือกแอพและเครื่องมือเสริม (Circle to Search, ภาพหน้าจอ, เลเซอร์พอยเตอร์, ปุ่มโฮม/ย้อนกลับ) ได้สูงสุด 10 รายการ และกดค้างที่แถวเพื่อลากจัดลำดับได้ทันที",
-                    "2. Add Apps & Built-in Tools",
-                    "Tap here to check or uncheck up to 10 apps and built-in tools (Circle to Search, Screenshot, Laser Pointer, Home/Back). Press and hold any row to drag-reorder."));
+                    n + ". เพิ่มแอพและเครื่องมือลงวงเมนู",
+                    "แตะปุ่ม Add app เพื่อติ๊กเลือกแอพและเครื่องมือเสริม (แปลหน้าจอ, Circle to Search, ภาพหน้าจอ, เลเซอร์พอยเตอร์, ปุ่มโฮม/ย้อนกลับ) ได้สูงสุด 10 รายการ และกดค้างที่แถวเพื่อลากจัดลำดับได้ทันที",
+                    n + ". Add Apps & Built-in Tools",
+                    "Tap Add app to check or uncheck up to 10 apps and built-in tools (Screen Translate, Circle to Search, Screenshot, Laser Pointer, Home/Back). Press and hold any row to drag-reorder."));
         }
         if (previewScene != null) {
+            int n = steps.size() + 1;
             steps.add(new MainTourOverlay.Step(
                     previewScene,
-                    "3. พรีวิววงเมนูแบบเรียลไทม์",
+                    n + ". พรีวิววงเมนูแบบเรียลไทม์",
                     "ดูหน้าตาวงเมนูจริงพร้อมลองจ่อปากกาหรือแตะทดสอบได้ทันที ทุกการเพิ่ม ลบ ลากเรียงลำดับ หรือเปลี่ยนสไตล์จะอัปเดตให้เห็นบนพื้นที่นี้สดๆ",
-                    "3. Live Interactive Ring Preview",
+                    n + ". Live Interactive Ring Preview",
                     "Test hovering and tapping your ring right here. Every added shortcut, drag-reorder, or style tweak updates this live preview immediately."));
         }
         if (tourAppearanceCard != null) {
+            int n = steps.size() + 1;
             steps.add(new MainTourOverlay.Step(
                     tourAppearanceCard,
-                    "4. ปรับแต่งหน้าตาวงเมนู",
+                    n + ". ปรับแต่งหน้าตาวงเมนู",
                     "เลือกสไตล์วงเมนูได้ 6 แบบ ตั้งธีมวงเมนู (สว่าง/มืด) แยกจากธีมแอพ เลือกสีวงเมนู ขนาดวง ความมืดฉากหลัง (Dim) และความเบลอพื้นหลัง (Blur) ตามชอบ",
-                    "4. Ring Appearance",
+                    n + ". Ring Appearance",
                     "Pick from 6 ring styles, set a Ring theme independently from the app theme, choose a Ring color, and adjust ring size, background dimming, and live backdrop blur."));
         }
         if (tourPenControlsCard != null) {
+            int n = steps.size() + 1;
             steps.add(new MainTourOverlay.Step(
                     tourPenControlsCard,
-                    "5. การควบคุมปากกา & รูปแบบการเปิดแอพ",
+                    n + ". การควบคุมปากกา & รูปแบบการเปิดแอพ",
                     "เลือกได้ว่าต้องใช้ปลายปากกาเท่านั้นหรือแตะด้วยนิ้วได้ ต้องจ่อใกล้จอหรือไม่ เปิดอัตโนมัติตอนเปิดเครื่อง และตั้งค่าการเปิดแอพเป็น หน้าต่างลอย (Floating), แบ่งหน้าจอ (Split screen) หรือ เต็มจอ",
-                    "5. Pen Controls & Launch Mode",
+                    n + ". Pen Controls & Launch Mode",
                     "Configure pen-only vs touch input, near-screen trigger, auto-start on boot, and choose whether shortcuts open in Floating window, Split screen, or Full screen."));
         }
         if (exclusionsSection != null) {
+            int n = steps.size() + 1;
             steps.add(new MainTourOverlay.Step(
                     exclusionsSection,
-                    "6. แอพที่ยกเว้น (Excluded apps)",
+                    n + ". แอพที่ยกเว้น (Excluded apps)",
                     "ใส่แอพวาดรูปหรือจดโน้ตอย่าง GoPaint หรือ Notes ไว้ตรงนี้ เพื่อให้การแตะด้านข้างปากกา 2 ครั้งยังคงสลับยางลบ/ปากกาของแอพนั้นตามปกติโดยไม่เปิด PenDock ทับ",
-                    "6. Excluded Apps",
+                    n + ". Excluded Apps",
                     "Add drawing or note apps like GoPaint or Notes here so double-tapping M-Pencil keeps switching to the eraser inside those apps instead of opening PenDock."));
         }
-        if (permissionsSection != null) {
-            steps.add(new MainTourOverlay.Step(
-                    permissionsSection,
-                    "7. สิทธิ์การใช้งานที่จำเป็น",
-                    "เปิดสิทธิ์ แสดงทับแอพอื่น และบริการ Accessibility ที่จำเป็นในส่วนนี้เพื่อให้วงเมนู, ภาพหน้าจอ, Circle to Search และโหมดหน้าต่างลอย/แบ่งหน้าจอทำงานได้สมบูรณ์ (ส่วนธีม ภาษา และเช็กอัปเดตอยู่ที่ไอคอนฟันเฟืองมุมขวาบน)",
-                    "7. Permissions & Settings",
-                    "Enable Display over other apps and the Accessibility services here so the ring, Screenshot, Circle to Search, and floating/split modes work smoothly. Use the gear icon at the top right for theme, language, and updates."));
+        if (!prioritizePermissions && permissionsSection != null) {
+            steps.add(buildPermissionsTourStep(steps.size() + 1, false));
         }
         if (steps.isEmpty()) return;
         tourOverlay = new MainTourOverlay(this, scroll, steps, startThai, startStep,
@@ -353,6 +511,39 @@ public class MainActivity extends Activity {
         root.addView(tourOverlay, new FrameLayout.LayoutParams(-1, -1));
     }
 
+    private MainTourOverlay.Step buildPermissionsTourStep(int stepNumber, boolean missingNow) {
+        boolean overlayMissing = !Settings.canDrawOverlays(this);
+        if (overlayMissing) {
+            View target = tourOverlayRow != null ? tourOverlayRow : permissionsSection;
+            return new MainTourOverlay.Step(
+                    target,
+                    stepNumber + ". ต้องเปิดสิทธิ์แสดงทับแอพอื่นก่อน (จำเป็น)",
+                    "จำเป็นต้องเปิดสิทธิ์ \"แสดงทับแอพอื่น\" (Display over other apps) ก่อน ไม่เช่นนั้นวงเมนู PenDock จะไม่สามารถแสดงและใช้งานได้ กดปุ่ม Grant access ในกรอบนี้ได้เลย เมื่อเปิดแล้ววงเมนูจะเริ่มทำงานให้อัตโนมัติทันที",
+                    stepNumber + ". Grant \"Display over other apps\" First (Required)",
+                    "You must grant \"Display over other apps\" first — without it, PenDock cannot open or work. Tap Grant access right inside this highlight; once granted, PenDock starts automatically.",
+                    false,
+                    true);
+        }
+        if (missingNow) {
+            return new MainTourOverlay.Step(
+                    permissionsSection,
+                    stepNumber + ". เปิดสิทธิ์การใช้งานเพิ่มเติม",
+                    "กดปุ่ม Grant access ในกรอบนี้เพื่อเปิดบริการ Accessibility ที่เหลือ เพื่อให้ฟีเจอร์ ภาพหน้าจอ, แปลหน้าจอ / Circle to Search และโหมดหน้าต่างลอย/แบ่งหน้าจอทำงานได้ครบทุกอย่าง",
+                    stepNumber + ". Enable Remaining Permissions",
+                    "Tap Grant access inside this highlight to turn on the remaining Accessibility services so Screenshot, Screen Translate / Circle to Search, and Floating/Split modes all work smoothly.",
+                    false,
+                    true);
+        }
+        return new MainTourOverlay.Step(
+                permissionsSection,
+                stepNumber + ". สิทธิ์การใช้งานที่จำเป็น",
+                "ตรวจสอบสิทธิ์ แสดงทับแอพอื่น และบริการ Accessibility ทั้งหมดในส่วนนี้ได้ตลอดเวลา (ส่วนธีม ภาษา จัดการโมเดล OCR และเช็กอัปเดตอยู่ที่ไอคอนฟันเฟืองมุมขวาบน)",
+                stepNumber + ". Permissions & Settings",
+                "Manage Display over other apps and Accessibility services here anytime. Use the gear icon at the top right for theme, language, OCR models, and updates.",
+                false,
+                true);
+    }
+
     private int dockStatusStroke() {
         return menuStatus ? colors.pick(0xff167245, 0xff8ce4ab) : colors.pick(0xffad293c, 0xffff9eaa);
     }
@@ -364,6 +555,7 @@ public class MainActivity extends Activity {
     private void renderMenuSettings() {
         List<Shortcuts.Entry> selected = shortcuts.selected();
         Collections.reverse(selected);
+        LinearLayout ringItemsSection = Ui.column(this);
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.setMinimumHeight(dp(48));
@@ -380,17 +572,18 @@ public class MainActivity extends Activity {
         titleParams.setMarginEnd(dp(10));
         heading.addView(headingSpace, titleParams);
         TextView addBtn = Ui.action(this, getString(R.string.add_app), false, this::pickApp);
-        tourAddAppButton = addBtn;
         heading.addView(addBtn);
-        add(heading, 0);
+        addSection(ringItemsSection, heading, 0);
         if (selected.isEmpty()) {
-            add(Ui.text(this, getString(R.string.empty_ring), 14, colors.muted, false), 12);
+            addSection(ringItemsSection, Ui.text(this, getString(R.string.empty_ring), 14, colors.muted, false), 12);
         } else {
             if (selected.size() > 1) {
-                add(Ui.text(this, getString(R.string.drag_hint), 13, colors.muted, false), 7);
+                addSection(ringItemsSection, Ui.text(this, getString(R.string.drag_hint), 13, colors.muted, false), 7);
             }
-            add(shortcutList(selected), 10);
+            addSection(ringItemsSection, shortcutList(selected), 10);
         }
+        tourAddAppButton = ringItemsSection;
+        add(ringItemsSection, 0);
 
         add(Ui.text(this, getString(R.string.pen_controls), 16, colors.text, true), 19);
         LinearLayout pen = card();
@@ -606,15 +799,39 @@ public class MainActivity extends Activity {
         addSectionHeading(system, R.string.permissions,
                 getString(R.string.granted_count, granted, circle ? 4 : 3));
         addSection(system, Ui.text(this, getString(R.string.permission_intro), 13, colors.muted, false), 8);
-        addSection(system, permissionRow(R.string.overlay_title, R.string.overlay_detail,
-                overlay, this::openOverlaySettings), 8);
-        addSection(system, permissionRow(R.string.system_actions_heading, R.string.screenshot_detail,
-                screenshot, this::openAccessibility), 5);
-        addSection(system, permissionRow(R.string.window_title, R.string.window_detail,
-                window, this::openAccessibility), 5);
+        boolean isThai = "th".equals(Appearance.language(this));
+        View overlayRow = permissionRow(R.string.overlay_title, R.string.overlay_detail,
+                overlay, this::openOverlaySettings, !overlay,
+                isThai ? "จำเป็นต้องเปิดสิทธิ์นี้ ไม่งั้นวงเมนู PenDock จะไม่สามารถใช้งานได้"
+                        : "Required — PenDock cannot open or work without this permission.");
+        tourOverlayRow = overlayRow;
+        addSection(system, overlayRow, 8);
+
+        boolean highlightSys = !screenshot && PERM_SYSTEM_ACTIONS.equals(focusedPermission);
+        View sysRow = permissionRow(R.string.system_actions_heading, R.string.screenshot_detail,
+                screenshot, this::openAccessibility, highlightSys,
+                isThai ? "จำเป็นต้องเปิดสิทธิ์นี้เพื่อใช้งานเครื่องมือที่คุณเลือก"
+                        : "Required to use the tool you just selected.");
+        tourSystemActionsRow = sysRow;
+        addSection(system, sysRow, 2);
+
+        boolean highlightWin = !window && PERM_WINDOW.equals(focusedPermission);
+        View winRow = permissionRow(R.string.window_title, R.string.window_detail,
+                window, this::openAccessibility, highlightWin,
+                isThai ? "จำเป็นต้องเปิดสิทธิ์นี้เพื่อใช้งานโหมดหน้าต่างลอย/แบ่งหน้าจอ"
+                        : "Required for floating and split-screen window tracking.");
+        tourWindowRow = winRow;
+        addSection(system, winRow, 2);
+
+        tourCircleRow = null;
         if (circle) {
-            addSection(system, permissionRow(R.string.circle_search, R.string.circle_detail,
-                    circleReady, this::openAccessibility), 5);
+            boolean highlightCircle = !circleReady && PERM_CIRCLE.equals(focusedPermission);
+            View circleRow = permissionRow(R.string.circle_search, R.string.circle_detail,
+                    circleReady, this::openAccessibility, highlightCircle,
+                    isThai ? "จำเป็นต้องเปิดสิทธิ์นี้เพื่อใช้งาน แปลหน้าจอ / Circle to Search"
+                            : "Required to use Screen Translate and Circle to Search.");
+            tourCircleRow = circleRow;
+            addSection(system, circleRow, 2);
         }
         if ("huawei".equalsIgnoreCase(Build.MANUFACTURER)) addHuaweiBackgroundHelp(system);
         if (new java.io.File(getFilesDir(), "draft.png").isFile()) {
@@ -660,13 +877,40 @@ public class MainActivity extends Activity {
         }
     }
 
-    private View permissionRow(int title, int detail, boolean granted, Runnable openSettings) {
+    private View permissionRow(int title, int detail, boolean granted, Runnable openSettings,
+            boolean highlightRequired, String requiredReason) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(dp(51));
+        row.setPadding(dp(12), dp(9), dp(12), dp(9));
+        int warnText = colors.pick(0xffb4232c, 0xffff9ea8);
+        if (highlightRequired && !granted) {
+            int warnFill = colors.pick(0xfffff2f2, 0xff3b2328);
+            int warnBorder = colors.pick(0xffe0525c, 0xffff8792);
+            row.setBackground(Ui.border(this, warnFill, 13, warnBorder));
+        }
         LinearLayout labels = Ui.column(this);
-        labels.addView(Ui.text(this, getString(title), 14, colors.text, true));
-        labels.addView(Ui.text(this, getString(detail), 12, colors.muted, false));
+        if (highlightRequired && !granted) {
+            LinearLayout titleLine = new LinearLayout(this);
+            titleLine.setGravity(Gravity.CENTER_VERTICAL);
+            titleLine.addView(Ui.text(this, getString(title), 14, colors.text, true),
+                    new LinearLayout.LayoutParams(-2, -2));
+            boolean isThai = "th".equals(Appearance.language(this));
+            TextView reqBadge = Ui.text(this, isThai ? "จำเป็น" : "Required", 11, warnText, true);
+            reqBadge.setPadding(dp(7), dp(2), dp(7), dp(2));
+            reqBadge.setBackground(Ui.shape(this, colors.pick(0xffffdce0, 0xff5a2832), 8));
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-2, -2);
+            bp.setMarginStart(dp(8));
+            titleLine.addView(reqBadge, bp);
+            labels.addView(titleLine);
+            TextView detailView = Ui.text(this, requiredReason, 12, warnText, false);
+            LinearLayout.LayoutParams dpP = new LinearLayout.LayoutParams(-1, -2);
+            dpP.topMargin = dp(2);
+            labels.addView(detailView, dpP);
+        } else {
+            labels.addView(Ui.text(this, getString(title), 14, colors.text, true));
+            labels.addView(Ui.text(this, getString(detail), 12, colors.muted, false));
+        }
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1);
         labelParams.setMarginEnd(dp(8));
         row.addView(labels, labelParams);
@@ -839,6 +1083,7 @@ public class MainActivity extends Activity {
         labelParams.setMarginStart(dp(12));
         row.addView(label, labelParams);
         Switch toggle = new Switch(this);
+        styleSwitch(toggle);
         toggle.setChecked(initial);
         toggle.setContentDescription(getString(labelRes));
         toggle.setOnCheckedChangeListener((button, checked) -> {
@@ -1312,13 +1557,21 @@ public class MainActivity extends Activity {
         control.setTextColor(colors.text);
         control.setTextSize(14);
         control.setMinHeight(dp(50));
+        styleSwitch(control);
         control.setChecked(enabled);
-        int[][] states = {{android.R.attr.state_checked}, {}};
-        control.setThumbTintList(ColorStateList.valueOf(colors.pick(0xffffffff, 0xfff1f4ff)));
-        control.setTrackTintList(new ColorStateList(states, new int[] {
-                colors.pick(0xff4264eb, 0xff536fde), colors.pick(0xffd4dbea, 0xff56617a)
-        }));
         return control;
+    }
+
+    private void styleSwitch(Switch control) {
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        control.setThumbTintList(new ColorStateList(states, new int[] {
+                colors.pick(0xff2863da, 0xff6e96ff),
+                colors.pick(0xfff5f7fc, 0xffc6cee0)
+        }));
+        control.setTrackTintList(new ColorStateList(states, new int[] {
+                colors.pick(0xff2863da, 0xff5a85f5),
+                colors.pick(0xff9aa6be, 0xff5e6a85)
+        }));
     }
 
     private LinearLayout appRow(Shortcuts.Entry app) {
@@ -1582,10 +1835,12 @@ public class MainActivity extends Activity {
     }
 
     private void toggleDock() {
-        if (DockService.running) {
+        if (DockService.running || (DockService.isEnabled(this) && Settings.canDrawOverlays(this))) {
             DockService.stop(this);
+            render();
         } else if (Settings.canDrawOverlays(this)) {
             DockService.start(this);
+            render();
         } else {
             openOverlaySettings();
         }

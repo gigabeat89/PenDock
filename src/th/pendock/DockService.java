@@ -357,9 +357,8 @@ public class DockService extends Service {
 
     private void takeScreenshot() {
         if (!SystemScreenshot.isReady()) {
-            open(MainActivity.class);
-            Toast.makeText(this, Appearance.text(this, R.string.capture_permission_message),
-                    Toast.LENGTH_LONG).show();
+            detach();
+            openForPermission(MainActivity.PERM_SYSTEM_ACTIONS, "screenshot");
             return;
         }
         detach();
@@ -379,9 +378,7 @@ public class DockService extends Service {
             return;
         }
         if (!CircleCaptureService.isReady()) {
-            open(MainActivity.class);
-            Toast.makeText(this, Appearance.text(this, R.string.circle_permission_message),
-                    Toast.LENGTH_LONG).show();
+            openForPermission(MainActivity.PERM_CIRCLE, "circle");
             return;
         }
         boolean hasExtra = RingConfig.isCircleShareShown(this)
@@ -540,9 +537,7 @@ public class DockService extends Service {
             return;
         }
         if (!CircleCaptureService.isReady()) {
-            open(MainActivity.class);
-            Toast.makeText(this, Appearance.text(this, R.string.translate_permission_message),
-                    Toast.LENGTH_LONG).show();
+            openForPermission(MainActivity.PERM_CIRCLE, "translate");
             return;
         }
         captureAndShowTranslate();
@@ -690,6 +685,16 @@ public class DockService extends Service {
         launch(intent, null);
     }
 
+    private void openForPermission(String permKey, String toolKey) {
+        Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(MainActivity.EXTRA_FOCUS_PERMISSION, permKey)
+                .putExtra(MainActivity.EXTRA_FOCUS_TOOL, toolKey);
+        launch(intent, null);
+    }
+
     private String penBattery() {
         int level = PenBattery.level(getContentResolver());
         if (level < 0) return "—";
@@ -700,9 +705,7 @@ public class DockService extends Service {
     private void lockScreen() {
         detach();
         if (!SystemScreenshot.isReady()) {
-            open(MainActivity.class);
-            Toast.makeText(this, Appearance.text(this, R.string.system_actions_permission),
-                    Toast.LENGTH_LONG).show();
+            openForPermission(MainActivity.PERM_SYSTEM_ACTIONS, "lock");
             return;
         }
         boolean accepted = SystemScreenshot.lockScreen();

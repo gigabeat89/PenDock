@@ -174,9 +174,9 @@ final class RingConfig {
     }
 
     static String windowSize(Context context) {
-        String value = prefs(context).getString(WINDOW_SIZE, WINDOW_NORMAL);
-        if (WINDOW_COMPACT.equals(value) || WINDOW_LARGE.equals(value)) return value;
-        return WINDOW_NORMAL;
+        String value = prefs(context).getString(WINDOW_SIZE, WINDOW_LARGE);
+        if (WINDOW_COMPACT.equals(value) || WINDOW_NORMAL.equals(value)) return value;
+        return WINDOW_LARGE;
     }
 
     static void setWindowSize(Context context, String size) {

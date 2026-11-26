@@ -9,6 +9,7 @@ import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
@@ -26,19 +27,26 @@ final class MainTourOverlay extends FrameLayout {
         final String titleEn;
         final String bodyEn;
         final boolean showDoubleTapDemo;
+        final boolean allowHoleTouch;
 
         Step(View target, String titleTh, String bodyTh, String titleEn, String bodyEn) {
-            this(target, titleTh, bodyTh, titleEn, bodyEn, false);
+            this(target, titleTh, bodyTh, titleEn, bodyEn, false, false);
         }
 
         Step(View target, String titleTh, String bodyTh, String titleEn, String bodyEn,
                 boolean showDoubleTapDemo) {
+            this(target, titleTh, bodyTh, titleEn, bodyEn, showDoubleTapDemo, false);
+        }
+
+        Step(View target, String titleTh, String bodyTh, String titleEn, String bodyEn,
+                boolean showDoubleTapDemo, boolean allowHoleTouch) {
             this.target = target;
             this.titleTh = titleTh;
             this.bodyTh = bodyTh;
             this.titleEn = titleEn;
             this.bodyEn = bodyEn;
             this.showDoubleTapDemo = showDoubleTapDemo;
+            this.allowHoleTouch = allowHoleTouch;
         }
     }
 
@@ -181,7 +189,7 @@ final class MainTourOverlay extends FrameLayout {
         post(() -> {
             if (closed) return;
             showStep(index, false);
-            animate().alpha(1f).setDuration(200).setInterpolator(EASE).start();
+            animate().alpha(1f).setDuration(180).setInterpolator(EASE).start();
         });
     }
 
@@ -191,6 +199,21 @@ final class MainTourOverlay extends FrameLayout {
 
     boolean isThai() {
         return thai;
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (!closed && ev != null && ev.getActionMasked() == MotionEvent.ACTION_DOWN
+                && index >= 0 && index < steps.size() && steps.get(index).allowHoleTouch) {
+            float x = ev.getX();
+            float y = ev.getY();
+            boolean insideCard = card.getVisibility() == VISIBLE
+                    && x >= card.getX() && x <= card.getX() + card.getWidth()
+                    && y >= card.getY() && y <= card.getY() + card.getHeight();
+            if (!insideCard && !currentHole.isEmpty() && currentHole.contains(x, y)) {
+                return false;
+            }
+        }
+        return super.dispatchTouchEvent(ev);
     }
 
     private TextView langButton(String label, Runnable onClick) {
@@ -238,36 +261,34 @@ final class MainTourOverlay extends FrameLayout {
             dismiss();
             return;
         }
+        if (morph != null) {
+            morph.cancel();
+            morph = null;
+        }
         index = Math.max(0, Math.min(steps.size() - 1, newIndex));
-        final int expectedIndex = index;
         renderStepText();
         Step step = steps.get(index);
-        boolean scrolled = scrollToTarget(step.target);
-        long delay = scrolled ? 280 : (animate ? 40 : 20);
-        postDelayed(() -> {
-            if (closed || index != expectedIndex) return;
-            measureTargetHole(step.target, targetHole);
-            if (!animate || currentHole.isEmpty()) {
-                currentHole.set(targetHole);
-                backdrop.invalidate();
-                positionCard(false);
-            } else {
-                animateHoleTo(targetHole);
+
+        int startScrollY = scroll != null ? scroll.getScrollY() : 0;
+        int desiredScrollY = computeDesiredScrollY(step.target);
+        int scrollDelta = desiredScrollY - startScrollY;
+
+        measureTargetHoleRaw(step.target, targetHole);
+        if (scrollDelta != 0 && isDescendantOf(step.target, scroll)) {
+            targetHole.offset(0f, -scrollDelta);
+        }
+        clampHoleToBounds(targetHole);
+
+        if (!animate || currentHole.isEmpty()) {
+            if (scroll != null && scrollDelta != 0) {
+                scroll.scrollTo(0, desiredScrollY);
             }
-            if (scrolled) {
-                // Re-sync once more after long smooth scrolls finish settling.
-                postDelayed(() -> {
-                    if (closed || index != expectedIndex) return;
-                    RectF settled = new RectF();
-                    measureTargetHole(step.target, settled);
-                    if (Math.abs(settled.top - targetHole.top) > dp(2)
-                            || Math.abs(settled.bottom - targetHole.bottom) > dp(2)) {
-                        targetHole.set(settled);
-                        animateHoleTo(targetHole);
-                    }
-                }, 220);
-            }
-        }, delay);
+            currentHole.set(targetHole);
+            backdrop.invalidate();
+            positionCard(false);
+        } else {
+            animateTransition(startScrollY, desiredScrollY, targetHole);
+        }
     }
 
     private void renderStepText() {
@@ -304,29 +325,47 @@ final class MainTourOverlay extends FrameLayout {
         pill.setTextColor(active ? colors.accent : colors.muted);
     }
 
-    private boolean scrollToTarget(View target) {
-        if (scroll == null || target == null) return false;
+    private int computeDesiredScrollY(View target) {
+        if (scroll == null || target == null || scroll.getChildCount() == 0) {
+            return scroll != null ? scroll.getScrollY() : 0;
+        }
         Rect rect = new Rect();
         target.getDrawingRect(rect);
         try {
             scroll.offsetDescendantRectToMyCoords(target, rect);
         } catch (IllegalArgumentException ignored) {
-            return false;
+            return scroll.getScrollY();
         }
         int viewH = scroll.getHeight();
-        if (viewH <= 0) return false;
-        int desiredTop = Math.max(0, rect.top - dp(88));
+        if (viewH <= 0) return scroll.getScrollY();
+        int maxScroll = Math.max(0, scroll.getChildAt(0).getHeight() - viewH);
         int curY = scroll.getScrollY();
-        if (rect.top < curY + dp(36) || rect.bottom > curY + viewH - dp(56)) {
-            if (Math.abs(desiredTop - curY) > dp(4)) {
-                scroll.smoothScrollTo(0, desiredTop);
-                return true;
-            }
+        if (rect.top >= curY + dp(36) && rect.bottom <= curY + viewH - dp(56)) {
+            return curY;
+        }
+        int desiredTop = Math.max(0, Math.min(maxScroll, rect.top - dp(88)));
+        return Math.abs(desiredTop - curY) > dp(4) ? desiredTop : curY;
+    }
+
+    private static boolean isDescendantOf(View child, View ancestor) {
+        if (child == null || ancestor == null) return false;
+        android.view.ViewParent p = child.getParent();
+        while (p instanceof View) {
+            if (p == ancestor) return true;
+            p = p.getParent();
         }
         return false;
     }
 
-    private void measureTargetHole(View target, RectF out) {
+    private void clampHoleToBounds(RectF hole) {
+        float l = Math.max(dp(6), hole.left);
+        float t = Math.max(dp(6), hole.top);
+        float r = Math.min(getWidth() - dp(6), hole.right);
+        float b = Math.min(getHeight() - dp(6), hole.bottom);
+        hole.set(l, t, Math.max(l + dp(20), r), Math.max(t + dp(20), b));
+    }
+
+    private void measureTargetHoleRaw(View target, RectF out) {
         if (target == null || !target.isAttachedToWindow() || target.getWidth() <= 0 || target.getHeight() <= 0) {
             float cx = getWidth() * 0.5f;
             float cy = getHeight() * 0.35f;
@@ -336,22 +375,26 @@ final class MainTourOverlay extends FrameLayout {
         getLocationOnScreen(myLoc);
         target.getLocationOnScreen(targetLoc);
         float pad = dp(8);
-        float l = Math.max(dp(6), targetLoc[0] - myLoc[0] - pad);
-        float t = Math.max(dp(6), targetLoc[1] - myLoc[1] - pad);
-        float r = Math.min(getWidth() - dp(6), targetLoc[0] - myLoc[0] + target.getWidth() + pad);
-        float b = Math.min(getHeight() - dp(6), targetLoc[1] - myLoc[1] + target.getHeight() + pad);
-        out.set(l, t, Math.max(l + dp(20), r), Math.max(t + dp(20), b));
+        float l = targetLoc[0] - myLoc[0] - pad;
+        float t = targetLoc[1] - myLoc[1] - pad;
+        float r = targetLoc[0] - myLoc[0] + target.getWidth() + pad;
+        float b = targetLoc[1] - myLoc[1] + target.getHeight() + pad;
+        out.set(l, t, r, b);
     }
 
-    private void animateHoleTo(RectF destination) {
+    private void animateTransition(int startScrollY, int endScrollY, RectF destination) {
         if (morph != null) morph.cancel();
         RectF start = new RectF(currentHole);
         RectF end = new RectF(destination);
+        boolean doScroll = scroll != null && startScrollY != endScrollY;
         morph = ValueAnimator.ofFloat(0f, 1f);
-        morph.setDuration(260);
+        morph.setDuration(280);
         morph.setInterpolator(EASE);
         morph.addUpdateListener(anim -> {
             float f = (float) anim.getAnimatedValue();
+            if (doScroll) {
+                scroll.scrollTo(0, Math.round(startScrollY + (endScrollY - startScrollY) * f));
+            }
             currentHole.set(
                     start.left + (end.left - start.left) * f,
                     start.top + (end.top - start.top) * f,
@@ -406,7 +449,7 @@ final class MainTourOverlay extends FrameLayout {
             y = rootH - cardH - margin;
         }
         if (animate) {
-            card.animate().translationX(x).translationY(y).setDuration(220).setInterpolator(EASE).start();
+            card.animate().translationX(x).translationY(y).setDuration(280).setInterpolator(EASE).start();
         } else {
             card.animate().cancel();
             card.setTranslationX(x);
