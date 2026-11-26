@@ -34,7 +34,8 @@ final class Shortcuts {
         FLOAT_WINDOW("tool:float_window", R.string.float_window, R.drawable.ic_float),
         SPLIT_SCREEN("tool:split_screen", R.string.split_screen, R.drawable.ic_split),
         LASER_POINTER("tool:laser_pointer", R.string.laser_tool, R.drawable.ic_laser),
-        TRANSLATE("tool:translate", R.string.translate_tool, R.drawable.ic_translate);
+        TRANSLATE("tool:translate", R.string.translate_tool, R.drawable.ic_translate),
+        PIN_SCREEN("tool:pin_screen", R.string.pin_tool, R.drawable.ic_pin);
 
         final String id;
         final int label;

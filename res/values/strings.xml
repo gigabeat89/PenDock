@@ -187,6 +187,7 @@
     <string name="split_pick_title">Choose second app</string>
     <string name="split_pinned">From your ring</string>
     <string name="split_recent">Recent apps</string>
+    <string name="split_floating_now">Open in floating window — close it first to pick for split screen (tap to focus)</string>
     <string name="laser_tool">Laser pointer</string>
     <string name="laser_color">Switch laser color</string>
     <string name="laser_overlay_failed">Couldn\'t open the laser pointer on this screen.</string>
@@ -210,6 +211,9 @@
     <string name="translate_pause">Pause to scroll screen</string>
     <string name="translate_resume">Resume and scan screen</string>
     <string name="translate_peek">Hold to peek original</string>
+    <string name="translate_lock_double_tap">Lock double-tap to Pause / Play</string>
+    <string name="translate_lock_on_toast">Double-tap locked to Pause / Play</string>
+    <string name="translate_lock_off_toast">Double-tap unlocked</string>
     <string name="translate_overlay_failed">Couldn\'t open Screen translate on this screen.</string>
     <string name="translate_permission_message">Enable PenDock · Circle to Search in Accessibility to capture the screen for translation.</string>
     <string name="ocr_models_title">Screen translate OCR models</string>
@@ -239,6 +243,13 @@
     <string name="circle_action_share">Share</string>
     <string name="circle_action_copy">Copy</string>
     <string name="circle_action_save">Save</string>
+    <string name="circle_action_pin">Pin</string>
+    <string name="pin_tool">Pin to screen</string>
+    <string name="pin_prompt">Drag a box to pin on screen</string>
+    <string name="pin_permission_message">Enable PenDock in Accessibility to pin part of the screen.</string>
+    <string name="pin_opacity">Toggle opacity</string>
+    <string name="pin_resize">Resize pinned image</string>
+    <string name="pin_hint_long_press">Pinned — long-press for Save, Copy, or Share</string>
     <string name="circle_copied">Copied image to clipboard.</string>
     <string name="circle_copy_failed">Couldn\'t copy the image.</string>
     <string name="circle_share_title">Share selected area</string>

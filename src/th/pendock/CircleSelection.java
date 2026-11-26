@@ -7,6 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -18,10 +19,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 final class CircleSelection extends FrameLayout {
-    enum Action { LENS, SHARE, COPY, SAVE }
+    enum Action { LENS, SHARE, COPY, SAVE, PIN }
 
     interface Listener {
-        void onAction(Action action, Bitmap crop);
+        void onAction(Action action, Bitmap crop, Rect screenBounds);
     }
 
     private final Bitmap screenshot;
@@ -30,21 +31,24 @@ final class CircleSelection extends FrameLayout {
     private final RectF screen = new RectF();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final boolean instantLens;
+    private final boolean instantPin;
     private final Runnable cancel;
     private final Listener onAction;
     private final View canvas;
     private final TextView prompt;
     private final LinearLayout actionBar;
     private int pointerId = -1;
+    private float boxStartX, boxStartY;
     private boolean hasSelection;
     private Bitmap pendingCrop;
 
     CircleSelection(Context context, Bitmap screenshot, boolean lensAvailable,
-            boolean showShare, boolean showCopy, boolean showSave,
+            boolean showShare, boolean showCopy, boolean showSave, boolean instantPin,
             Runnable cancel, Listener onAction) {
         super(context);
         this.screenshot = screenshot;
-        this.instantLens = !showShare && !showCopy && !showSave;
+        this.instantPin = instantPin;
+        this.instantLens = !instantPin && !showShare && !showCopy && !showSave;
         Appearance.Palette colors = Ui.colors(context);
         this.cancel = cancel;
         this.onAction = onAction;
@@ -63,7 +67,11 @@ final class CircleSelection extends FrameLayout {
                 if (pointerId == -1 && !hasSelection) return;
 
                 int layer = display.save();
-                display.clipPath(outline);
+                if (instantPin) {
+                    display.clipRect(bounds);
+                } else {
+                    display.clipPath(outline);
+                }
                 display.drawBitmap(screenshot, null, screen, paint);
                 display.restoreToCount(layer);
                 paint.setColor(colors.accent);
@@ -71,7 +79,12 @@ final class CircleSelection extends FrameLayout {
                 paint.setStrokeCap(Paint.Cap.ROUND);
                 paint.setStrokeJoin(Paint.Join.ROUND);
                 paint.setStrokeWidth(Ui.dp(context, 3));
-                display.drawPath(outline, paint);
+                if (instantPin) {
+                    float r = Ui.dp(context, 10);
+                    display.drawRoundRect(bounds, r, r, paint);
+                } else {
+                    display.drawPath(outline, paint);
+                }
             }
         };
         canvas.setContentDescription(context.getString(R.string.selection_area));
@@ -83,7 +96,8 @@ final class CircleSelection extends FrameLayout {
         int padding = Ui.dp(context, 10);
         tools.setPadding(padding * 2, padding, padding, padding);
         tools.setBackground(Ui.border(context, colors.background, 20, colors.border));
-        prompt = Ui.text(context, context.getString(R.string.circle_prompt), 16, colors.text, true);
+        prompt = Ui.text(context, context.getString(instantPin ? R.string.pin_prompt : R.string.circle_prompt),
+                16, colors.text, true);
         prompt.setPadding(0, 0, padding, 0);
         tools.addView(prompt);
         tools.addView(Ui.action(context, context.getString(R.string.cancel), false, cancel));
@@ -96,11 +110,12 @@ final class CircleSelection extends FrameLayout {
         actionBar.setPadding(padding, padding, padding, padding);
         actionBar.setBackground(Ui.border(context, colors.background, 20, colors.border));
         actionBar.setVisibility(GONE);
-        if (!instantLens) {
+        if (!instantLens && !instantPin) {
             if (lensAvailable) addActionButton(context, colors, R.drawable.ic_lens, R.string.circle_action_lens, Action.LENS);
             if (showShare) addActionButton(context, colors, R.drawable.ic_share, R.string.circle_action_share, Action.SHARE);
             if (showCopy) addActionButton(context, colors, R.drawable.ic_copy, R.string.circle_action_copy, Action.COPY);
             if (showSave) addActionButton(context, colors, R.drawable.ic_save, R.string.circle_action_save, Action.SAVE);
+            addActionButton(context, colors, R.drawable.ic_pin, R.string.circle_action_pin, Action.PIN);
         }
         LayoutParams bottom = new LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         bottom.bottomMargin = Ui.dp(context, 42);
@@ -135,9 +150,20 @@ final class CircleSelection extends FrameLayout {
     }
 
     private void chooseAction(Action action) {
+        if (action == Action.PIN) {
+            Bitmap rectCrop = crop(true);
+            clearPendingCrop();
+            if (rectCrop != null) onAction.onAction(Action.PIN, rectCrop, screenBoundsRect());
+            return;
+        }
         Bitmap crop = pendingCrop;
         pendingCrop = null;
-        if (crop != null) onAction.onAction(action, crop);
+        if (crop != null) onAction.onAction(action, crop, screenBoundsRect());
+    }
+
+    private Rect screenBoundsRect() {
+        return new Rect(Math.round(bounds.left), Math.round(bounds.top),
+                Math.round(bounds.right), Math.round(bounds.bottom));
     }
 
     private boolean trace(MotionEvent event) {
@@ -151,31 +177,53 @@ final class CircleSelection extends FrameLayout {
             clearPendingCrop();
             hasSelection = false;
             actionBar.setVisibility(GONE);
-            prompt.setText(R.string.circle_prompt);
+            prompt.setText(instantPin ? R.string.pin_prompt : R.string.circle_prompt);
             pointerId = event.getPointerId(0);
-            outline.reset();
-            outline.moveTo(event.getX(), event.getY());
+            if (instantPin) {
+                boxStartX = event.getX();
+                boxStartY = event.getY();
+                bounds.set(boxStartX, boxStartY, boxStartX, boxStartY);
+            } else {
+                outline.reset();
+                outline.moveTo(event.getX(), event.getY());
+            }
             canvas.invalidate();
             return true;
         }
         int pointer = event.findPointerIndex(pointerId);
         if (pointer < 0) return true;
         if (action == MotionEvent.ACTION_MOVE) {
-            for (int i = 0; i < event.getHistorySize(); i++) {
-                outline.lineTo(event.getHistoricalX(pointer, i), event.getHistoricalY(pointer, i));
+            if (instantPin) {
+                float x = event.getX(pointer);
+                float y = event.getY(pointer);
+                bounds.set(Math.min(boxStartX, x), Math.min(boxStartY, y),
+                        Math.max(boxStartX, x), Math.max(boxStartY, y));
+            } else {
+                for (int i = 0; i < event.getHistorySize(); i++) {
+                    outline.lineTo(event.getHistoricalX(pointer, i), event.getHistoricalY(pointer, i));
+                }
+                outline.lineTo(event.getX(pointer), event.getY(pointer));
             }
-            outline.lineTo(event.getX(pointer), event.getY(pointer));
             canvas.invalidate();
         } else if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP)
                 && event.getActionIndex() == pointer) {
-            outline.lineTo(event.getX(pointer), event.getY(pointer));
-            outline.close();
-            outline.computeBounds(bounds, true);
+            if (instantPin) {
+                float x = event.getX(pointer);
+                float y = event.getY(pointer);
+                bounds.set(Math.min(boxStartX, x), Math.min(boxStartY, y),
+                        Math.max(boxStartX, x), Math.max(boxStartY, y));
+            } else {
+                outline.lineTo(event.getX(pointer), event.getY(pointer));
+                outline.close();
+                outline.computeBounds(bounds, true);
+            }
             pointerId = -1;
-            Bitmap crop = crop();
+            Bitmap crop = crop(instantPin);
             if (crop != null) {
-                if (instantLens) {
-                    onAction.onAction(Action.LENS, crop);
+                if (instantPin) {
+                    onAction.onAction(Action.PIN, crop, screenBoundsRect());
+                } else if (instantLens) {
+                    onAction.onAction(Action.LENS, crop, screenBoundsRect());
                 } else {
                     clearPendingCrop();
                     pendingCrop = crop;
@@ -191,7 +239,7 @@ final class CircleSelection extends FrameLayout {
         return true;
     }
 
-    private Bitmap crop() {
+    private Bitmap crop(boolean rectangular) {
         int minimum = Ui.dp(getContext(), 14);
         if (bounds.width() < minimum || bounds.height() < minimum
                 || canvas.getWidth() <= 0 || canvas.getHeight() <= 0) return null;
@@ -203,6 +251,9 @@ final class CircleSelection extends FrameLayout {
         int bottom = Math.min(screenshot.getHeight(), (int) Math.ceil(bounds.bottom * scaleY));
         if (right <= left || bottom <= top) return null;
 
+        if (rectangular) {
+            return Bitmap.createBitmap(screenshot, left, top, right - left, bottom - top);
+        }
         Bitmap result = Bitmap.createBitmap(right - left, bottom - top, Bitmap.Config.ARGB_8888);
         Canvas output = new Canvas(result);
         output.translate(-left, -top);

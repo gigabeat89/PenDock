@@ -272,17 +272,22 @@ public class MainActivity extends Activity {
         String bodyEn;
         if (PERM_CIRCLE.equals(permKey)) {
             boolean isTranslate = "translate".equals(toolKey);
+            boolean isPin = "pin".equals(toolKey);
             titleTh = isTranslate
                     ? "ต้องเปิดสิทธิ์สำหรับ \"แปลหน้าจอ\""
+                    : isPin ? "ต้องเปิดสิทธิ์สำหรับ \"ปักหมุดหน้าจอ\""
                     : "ต้องเปิดสิทธิ์สำหรับ \"Circle to Search\"";
             bodyTh = isTranslate
                     ? "เครื่องมือ แปลหน้าจอ ต้องใช้บริการ Accessibility สำหรับจับภาพหน้าจอ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิด \"PenDock Screen Capture\" ได้เลย"
+                    : isPin ? "เครื่องมือ ปักหมุดหน้าจอ ต้องใช้บริการ Accessibility สำหรับจับภาพหน้าจอ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิด \"PenDock Screen Capture\" ได้เลย"
                     : "เครื่องมือ Circle to Search ต้องใช้บริการ Accessibility สำหรับจับภาพหน้าจอ กดปุ่ม Grant access ในกรอบสีแดงนี้แล้วเปิด \"PenDock Screen Capture\" ได้เลย";
             titleEn = isTranslate
                     ? "Permission Required for Screen Translate"
+                    : isPin ? "Permission Required for Pin to Screen"
                     : "Permission Required for Circle to Search";
             bodyEn = isTranslate
                     ? "Screen Translate needs the screen-capture Accessibility service. Tap Grant access inside the highlighted row and enable \"PenDock Screen Capture\"."
+                    : isPin ? "Pin to Screen needs the screen-capture Accessibility service. Tap Grant access inside the highlighted row and enable \"PenDock Screen Capture\"."
                     : "Circle to Search needs the screen-capture Accessibility service. Tap Grant access inside the highlighted row and enable \"PenDock Screen Capture\".";
         } else if (PERM_SYSTEM_ACTIONS.equals(permKey)) {
             boolean isLock = "lock".equals(toolKey);

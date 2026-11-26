@@ -79,13 +79,16 @@ final class TranslateOverlay extends FrameLayout {
     private final LinearLayout toolbar;
     private final LinearLayout collapsedPill;
     private final TextView collapsedLabel;
-    private final TextView collapsedPauseBtn;
-    private final TextView edgeTab;
+    private final android.widget.ImageView collapsedPauseBtn;
+    private final FrameLayout edgeTab;
+    private final android.widget.ImageView edgeMainIcon;
+    private final android.widget.ImageView edgeStatusIcon;
     private final LinearLayout pointSubBar;
     private final TextView wordSubBtn, lineSubBtn, pointSubHint;
     private final TextView statusSubPill;
     private final TextView boxTab, pointTab, fullTab;
-    private final TextView packPill, targetPill, peekBtn, pauseBtn;
+    private final TextView packPill, targetPill, peekBtn;
+    private final android.widget.ImageView pauseBtn;
     private final LinearLayout resultCard;
     private final android.widget.ScrollView resultScroll;
     private final TextView resultTranslated, resultOriginal, resultCopyBtn, resultSpeakBtn;
@@ -97,6 +100,7 @@ final class TranslateOverlay extends FrameLayout {
     private boolean wordUnit = true;
     private boolean toolbarCollapsed;
     private boolean paused;
+    private boolean doubleTapLocked;
     private int edgeDock; // -1 = left edge, 0 = free, +1 = right edge
     private float barX, barY;
     private boolean toolbarPositioned;
@@ -159,6 +163,8 @@ final class TranslateOverlay extends FrameLayout {
         toolbarContainer.setAlpha(TOOLBAR_ALPHA);
 
         toolbar = new LinearLayout(context);
+        toolbar.setClipChildren(false);
+        toolbar.setClipToPadding(false);
         toolbar.setOrientation(LinearLayout.HORIZONTAL);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(8), dp(6), dp(8), dp(6));
@@ -218,8 +224,8 @@ final class TranslateOverlay extends FrameLayout {
         });
         toolbar.addView(peekBtn, barItemParams(6));
 
-        pauseBtn = iconPill("⏸", context.getString(R.string.translate_pause));
-        pauseBtn.setOnClickListener(v -> togglePause());
+        pauseBtn = vectorIconPill(R.drawable.ic_translate_pause, context.getString(R.string.translate_pause), 34, 17);
+        attachPause3DTouch(pauseBtn);
         toolbar.addView(pauseBtn, barItemParams(4));
 
         TextView collapseBtn = iconPill("–", context.getString(R.string.translate_tool));
@@ -234,6 +240,8 @@ final class TranslateOverlay extends FrameLayout {
 
         // Compact collapsed pill (shows mode, spaced language pair, Pause/Resume, Close; drag to edge to tuck)
         collapsedPill = new LinearLayout(context);
+        collapsedPill.setClipChildren(false);
+        collapsedPill.setClipToPadding(false);
         collapsedPill.setOrientation(LinearLayout.HORIZONTAL);
         collapsedPill.setGravity(Gravity.CENTER_VERTICAL);
         collapsedPill.setPadding(dp(12), dp(7), dp(8), dp(7));
@@ -249,12 +257,10 @@ final class TranslateOverlay extends FrameLayout {
         collapsedLabel.setPadding(0, 0, dp(8), 0);
         collapsedPill.addView(collapsedLabel, new LinearLayout.LayoutParams(-2, -2));
 
-        collapsedPauseBtn = iconPill("⏸", context.getString(R.string.translate_pause));
-        collapsedPauseBtn.setMinWidth(dp(28));
-        collapsedPauseBtn.setMinHeight(dp(28));
-        collapsedPauseBtn.setPadding(dp(6), dp(2), dp(6), dp(2));
-        collapsedPauseBtn.setOnClickListener(v -> togglePause());
-        collapsedPill.addView(collapsedPauseBtn, new LinearLayout.LayoutParams(-2, -2));
+        collapsedPauseBtn = vectorIconPill(R.drawable.ic_translate_pause,
+                context.getString(R.string.translate_pause), 28, 14);
+        attachPause3DTouch(collapsedPauseBtn);
+        collapsedPill.addView(collapsedPauseBtn, new LinearLayout.LayoutParams(dp(28), dp(28)));
 
         TextView collapsedClose = iconPill("✕", context.getString(R.string.close));
         collapsedClose.setMinWidth(dp(28));
@@ -268,17 +274,28 @@ final class TranslateOverlay extends FrameLayout {
         attachToolbarDrag(collapsedPill, true, false);
         toolbarContainer.addView(collapsedPill, new LinearLayout.LayoutParams(-2, -2));
 
-        // Sleek side-edge handle shown when the collapsed pill is docked against the left or right edge
-        edgeTab = Ui.text(context, "›", 18, colors.accent, true);
-        edgeTab.setGravity(Gravity.CENTER);
-        edgeTab.setMinWidth(dp(26));
-        edgeTab.setMinHeight(dp(56));
-        edgeTab.setPadding(dp(6), dp(12), dp(6), dp(12));
+        // Sleek side-edge handle shown when the toolbar is docked against the left or right edge
+        edgeTab = new FrameLayout(context);
         edgeTab.setBackground(Ui.border(context, withAlpha(colors.surface, 244), 14, colors.accent));
         applyShadow(edgeTab, 12);
+        LinearLayout edgeCol = new LinearLayout(context);
+        edgeCol.setOrientation(LinearLayout.VERTICAL);
+        edgeCol.setGravity(Gravity.CENTER);
+        edgeMainIcon = new android.widget.ImageView(context);
+        edgeMainIcon.setImageResource(R.drawable.ic_translate);
+        edgeMainIcon.setImageTintList(android.content.res.ColorStateList.valueOf(colors.accent));
+        edgeCol.addView(edgeMainIcon, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        edgeStatusIcon = new android.widget.ImageView(context);
+        edgeStatusIcon.setImageResource(R.drawable.ic_translate_pause);
+        edgeStatusIcon.setImageTintList(android.content.res.ColorStateList.valueOf(colors.accent));
+        LinearLayout.LayoutParams statusIconP = new LinearLayout.LayoutParams(dp(12), dp(12));
+        statusIconP.topMargin = dp(4);
+        edgeCol.addView(edgeStatusIcon, statusIconP);
+        edgeTab.addView(edgeCol, new LayoutParams(-2, -2, Gravity.CENTER));
+        edgeTab.setContentDescription(context.getString(R.string.translate_tool));
         edgeTab.setVisibility(GONE);
         attachToolbarDrag(edgeTab, false, true);
-        toolbarContainer.addView(edgeTab, new LinearLayout.LayoutParams(-2, -2));
+        toolbarContainer.addView(edgeTab, new LinearLayout.LayoutParams(dp(36), dp(54)));
 
         // Sub-button bar hanging neatly below the Point tab (Word / Line + inline hover hint)
         pointSubBar = new LinearLayout(context);
@@ -496,19 +513,14 @@ final class TranslateOverlay extends FrameLayout {
         int snapDist = dp(28);
         if (barX <= snapDist) {
             edgeDock = -1;
+            barX = 0f;
             updateToolbarUi();
-            post(() -> {
-                barX = 0f;
-                applyToolbarPosition();
-            });
+            applyToolbarPosition();
         } else if (barX + barW >= sw - snapDist) {
             edgeDock = 1;
+            barX = Math.max(0f, sw - dp(36));
             updateToolbarUi();
-            post(() -> {
-                int tabW = Math.max(dp(26), edgeTab.getWidth());
-                barX = Math.max(0f, sw - tabW);
-                applyToolbarPosition();
-            });
+            applyToolbarPosition();
         }
     }
 
@@ -516,13 +528,13 @@ final class TranslateOverlay extends FrameLayout {
         int side = edgeDock;
         edgeDock = 0;
         updateToolbarUi();
-        post(() -> {
-            int sw = screenW();
-            View activeBar = toolbarCollapsed ? collapsedPill : toolbar;
-            int activeW = Math.max(dp(180), activeBar.getWidth());
-            float targetX = side > 0 ? Math.max(dp(10), sw - activeW - dp(10)) : dp(10);
-            moveToolbar(targetX, barY);
-        });
+        View activeBar = toolbarCollapsed ? collapsedPill : toolbar;
+        activeBar.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+        int sw = screenW();
+        int activeW = Math.max(dp(180), activeBar.getMeasuredWidth());
+        float targetX = side > 0 ? Math.max(dp(10), sw - activeW - dp(10)) : dp(10);
+        moveToolbar(targetX, barY);
     }
 
     void pauseIfActive() {
@@ -533,7 +545,7 @@ final class TranslateOverlay extends FrameLayout {
         post(() -> {
             if (closed) return;
             if (edgeDock > 0) {
-                int tabW = Math.max(dp(26), edgeTab.getWidth());
+                int tabW = Math.max(dp(36), edgeTab.getWidth());
                 barX = Math.max(0f, screenW() - tabW);
             } else if (edgeDock < 0) {
                 barX = 0f;
@@ -566,22 +578,17 @@ final class TranslateOverlay extends FrameLayout {
             if (collapsed) {
                 if (targetX <= dp(24)) {
                     edgeDock = -1;
+                    barX = 0f;
+                    barY = targetY;
                     updateToolbarUi();
-                    post(() -> {
-                        barX = 0f;
-                        barY = targetY;
-                        applyToolbarPosition();
-                    });
+                    applyToolbarPosition();
                     return;
                 } else if (targetX + newW >= curSw - dp(24)) {
                     edgeDock = 1;
+                    barX = Math.max(0f, curSw - dp(36));
+                    barY = targetY;
                     updateToolbarUi();
-                    post(() -> {
-                        int tabW = Math.max(dp(26), edgeTab.getWidth());
-                        barX = Math.max(0f, curSw - tabW);
-                        barY = targetY;
-                        applyToolbarPosition();
-                    });
+                    applyToolbarPosition();
                     return;
                 }
             }
@@ -622,6 +629,8 @@ final class TranslateOverlay extends FrameLayout {
         hoveredSourceText = null;
         peekingOriginal = false;
         paused = false;
+        cancelPendingWork();
+        hideResultCard();
         stage.setVisibility(VISIBLE);
         updateToolbarUi();
         post(() -> {
@@ -637,6 +646,28 @@ final class TranslateOverlay extends FrameLayout {
 
     boolean isPaused() {
         return paused;
+    }
+
+    boolean isDoubleTapLocked() {
+        return doubleTapLocked;
+    }
+
+    void togglePauseFromDoubleTap() {
+        if (!closed) togglePause();
+    }
+
+    private void toggleDoubleTapLock() {
+        doubleTapLocked = !doubleTapLocked;
+        if (doubleTapLocked && paused) {
+            // Entering lock mode always starts in the Locked (active) state.
+            updateToolbarUi();
+            if (host != null) host.onRequestResume();
+        } else {
+            updateToolbarUi();
+        }
+        Toast.makeText(getContext(),
+                doubleTapLocked ? R.string.translate_lock_on_toast : R.string.translate_lock_off_toast,
+                Toast.LENGTH_SHORT).show();
     }
 
     private TextView subModeButton(String label, Runnable onClick) {
@@ -679,6 +710,80 @@ final class TranslateOverlay extends FrameLayout {
         return btn;
     }
 
+    private android.widget.ImageView vectorIconPill(int drawableRes, String desc, int boxDp, int iconDp) {
+        android.widget.ImageView iv = new android.widget.ImageView(getContext());
+        iv.setImageResource(drawableRes);
+        iv.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        int pad = dp(Math.max(4, (boxDp - iconDp) / 2f));
+        iv.setPadding(pad, pad, pad, pad);
+        iv.setMinimumWidth(dp(boxDp));
+        iv.setMinimumHeight(dp(boxDp));
+        iv.setContentDescription(desc);
+        iv.setTooltipText(desc);
+        iv.setBackground(Ui.pressable(getContext(), colors.rail, 12, colors.border));
+        return iv;
+    }
+
+    /** Apple 3D Touch-style long-press on Play/Pause: gently swells up, then snaps back fast & toggles Lock. */
+    private void attachPause3DTouch(android.widget.ImageView btn) {
+        final long holdMs = 400L;
+        final float slop = dp(10);
+        final float[] down = new float[2];
+        final boolean[] fired = {false};
+        final boolean[] cancelled = {false};
+        final Runnable lockTask = () -> {
+            if (closed || cancelled[0]) return;
+            fired[0] = true;
+            btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            toggleDoubleTapLock();
+            // Rapid Apple-style snap-back recoil: 1.24 -> 0.90 -> 1.00
+            btn.animate().cancel();
+            btn.animate().scaleX(0.90f).scaleY(0.90f).setDuration(95)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(() -> btn.animate().scaleX(1f).scaleY(1f).translationZ(0f).setDuration(85)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start())
+                    .start();
+        };
+        btn.setOnTouchListener((v, ev) -> {
+            int act = ev.getActionMasked();
+            if (act == MotionEvent.ACTION_DOWN) {
+                down[0] = ev.getRawX();
+                down[1] = ev.getRawY();
+                fired[0] = false;
+                cancelled[0] = false;
+                main.removeCallbacks(lockTask);
+                main.postDelayed(lockTask, holdMs);
+                // Lift above neighboring buttons (e.g. collapse/hide) and smoothly swell
+                btn.setTranslationZ(dp(6));
+                btn.animate().cancel();
+                btn.animate().scaleX(1.24f).scaleY(1.24f).setDuration(holdMs)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
+                        .start();
+                return true;
+            } else if (act == MotionEvent.ACTION_MOVE) {
+                if (!fired[0] && !cancelled[0]
+                        && Math.hypot(ev.getRawX() - down[0], ev.getRawY() - down[1]) > slop) {
+                    cancelled[0] = true;
+                    main.removeCallbacks(lockTask);
+                    btn.animate().cancel();
+                    btn.animate().scaleX(1f).scaleY(1f).translationZ(0f).setDuration(110).start();
+                }
+                return true;
+            } else if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) {
+                main.removeCallbacks(lockTask);
+                if (!fired[0]) {
+                    btn.animate().cancel();
+                    btn.animate().scaleX(1f).scaleY(1f).translationZ(0f).setDuration(110).start();
+                    if (act == MotionEvent.ACTION_UP && !cancelled[0]) {
+                        togglePause();
+                    }
+                }
+                return true;
+            }
+            return false;
+        });
+    }
+
     private TextView smallAction(String label, Runnable onClick) {
         TextView btn = Ui.text(getContext(), label, 12, colors.accent, true);
         btn.setGravity(Gravity.CENTER);
@@ -699,9 +804,6 @@ final class TranslateOverlay extends FrameLayout {
         toolbar.setVisibility(!toolbarCollapsed && !tucked ? VISIBLE : GONE);
         collapsedPill.setVisibility(toolbarCollapsed && !tucked ? VISIBLE : GONE);
         edgeTab.setVisibility(tucked ? VISIBLE : GONE);
-        if (tucked) {
-            edgeTab.setText(edgeDock < 0 ? "›" : "‹");
-        }
 
         String modeLabel = MODE_BOX.equals(mode) ? getContext().getString(R.string.translate_mode_box)
                 : MODE_POINT.equals(mode) ? getContext().getString(R.string.translate_mode_point)
@@ -710,6 +812,7 @@ final class TranslateOverlay extends FrameLayout {
 
         applyPauseButtonStyle(pauseBtn);
         applyPauseButtonStyle(collapsedPauseBtn);
+        applyEdgeTabStyle();
 
         applyTabStyle(boxTab, MODE_BOX.equals(mode));
         applyTabStyle(pointTab, MODE_POINT.equals(mode));
@@ -732,15 +835,45 @@ final class TranslateOverlay extends FrameLayout {
         }
     }
 
-    private void applyPauseButtonStyle(TextView btn) {
-        btn.setText(paused ? "▶" : "⏸");
-        String desc = getContext().getString(paused ? R.string.translate_resume : R.string.translate_pause);
+    private void applyPauseButtonStyle(android.widget.ImageView btn) {
+        int iconRes;
+        if (doubleTapLocked) {
+            iconRes = paused ? R.drawable.ic_translate_unlock : R.drawable.ic_translate_lock;
+        } else {
+            iconRes = paused ? R.drawable.ic_translate_play : R.drawable.ic_translate_pause;
+        }
+        btn.setImageResource(iconRes);
+        String desc = getContext().getString(doubleTapLocked
+                ? R.string.translate_lock_double_tap
+                : (paused ? R.string.translate_resume : R.string.translate_pause));
         btn.setContentDescription(desc);
         btn.setTooltipText(desc);
-        btn.setBackground(Ui.pressable(getContext(),
-                paused ? colors.accent : colors.rail, 12,
-                paused ? colors.accent : colors.border));
-        btn.setTextColor(paused ? 0xffffffff : colors.text);
+        if (paused) {
+            btn.setBackground(Ui.pressable(getContext(), colors.accent, 12, colors.accent));
+            btn.setImageTintList(android.content.res.ColorStateList.valueOf(0xffffffff));
+        } else if (doubleTapLocked) {
+            btn.setBackground(Ui.pressable(getContext(), colors.accentWash, 12, colors.accent));
+            btn.setImageTintList(android.content.res.ColorStateList.valueOf(colors.accent));
+        } else {
+            btn.setBackground(Ui.pressable(getContext(), colors.rail, 12, colors.border));
+            btn.setImageTintList(android.content.res.ColorStateList.valueOf(colors.text));
+        }
+    }
+
+    private void applyEdgeTabStyle() {
+        int statusRes;
+        if (doubleTapLocked) {
+            statusRes = paused ? R.drawable.ic_translate_unlock : R.drawable.ic_translate_lock;
+        } else {
+            statusRes = paused ? R.drawable.ic_translate_play : R.drawable.ic_translate_pause;
+        }
+        edgeStatusIcon.setImageResource(statusRes);
+        int borderCol = paused ? colors.border : colors.accent;
+        int mainTint = paused ? colors.muted : colors.accent;
+        int statusTint = paused ? colors.muted : colors.accent;
+        edgeTab.setBackground(Ui.border(getContext(), withAlpha(colors.surface, 244), 14, borderCol));
+        edgeMainIcon.setImageTintList(android.content.res.ColorStateList.valueOf(mainTint));
+        edgeStatusIcon.setImageTintList(android.content.res.ColorStateList.valueOf(statusTint));
     }
 
     private void applySubStyle(TextView btn, boolean active) {
@@ -1031,7 +1164,7 @@ final class TranslateOverlay extends FrameLayout {
                     }
                 }
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     scanning = false;
                     scannedPack = pack;
                     scannedLines = lines;
@@ -1043,7 +1176,7 @@ final class TranslateOverlay extends FrameLayout {
                 android.util.Log.e("PenDock", "OCR full scan failed", err);
                 String detail = formatError("OCR", err);
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     scanning = false;
                     updateToolbarUi();
                     Toast.makeText(getContext(), detail, Toast.LENGTH_LONG).show();
@@ -1082,7 +1215,7 @@ final class TranslateOverlay extends FrameLayout {
                     built.add(new FullBlock(blocks.get(i), tr.trim(), darkBg));
                 }
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     fullBlocks = built;
                     updateToolbarUi();
                     stage.invalidate();
@@ -1091,7 +1224,7 @@ final class TranslateOverlay extends FrameLayout {
                 android.util.Log.e("PenDock", "Full-screen batch translation failed", err);
                 String detail = formatError("Translate", err);
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     updateToolbarUi();
                     Toast.makeText(getContext(), detail, Toast.LENGTH_LONG).show();
                 });
@@ -1128,7 +1261,7 @@ final class TranslateOverlay extends FrameLayout {
                 }
                 if (origParagraphs.isEmpty()) {
                     main.post(() -> {
-                        if (closed || gen != scanGeneration) return;
+                        if (closed || paused || gen != scanGeneration) return;
                         showResultCard(getContext().getString(R.string.translate_no_text), "", anchor, false);
                     });
                     return;
@@ -1137,14 +1270,14 @@ final class TranslateOverlay extends FrameLayout {
                 String translated = joinParagraphs(trParagraphs);
                 String original = joinParagraphs(origParagraphs);
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     showResultCard(translated, original, anchor, true);
                 });
             } catch (Throwable err) {
                 android.util.Log.e("PenDock", "Box translate failed", err);
                 String detail = formatError("Translate", err);
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     showResultCard(detail, "", anchor, false);
                 });
             }
@@ -1167,14 +1300,14 @@ final class TranslateOverlay extends FrameLayout {
             try {
                 String translated = GoogleTranslator.translate(sourceText, srcHint, dst);
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     showResultCard(translated, sourceText, anchorViewRect, true);
                 });
             } catch (Throwable err) {
                 android.util.Log.e("PenDock", "Snippet translate failed", err);
                 String detail = formatError("Translate", err);
                 main.post(() -> {
-                    if (closed || gen != scanGeneration) return;
+                    if (closed || paused || gen != scanGeneration) return;
                     showResultCard(detail, sourceText, anchorViewRect, false);
                 });
             }
@@ -1441,6 +1574,8 @@ final class TranslateOverlay extends FrameLayout {
     }
 
     private void cancelPendingWork() {
+        scanGeneration++;
+        scanning = false;
         if (pendingHoverTranslate != null) {
             main.removeCallbacks(pendingHoverTranslate);
             pendingHoverTranslate = null;

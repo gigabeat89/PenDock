@@ -90,11 +90,16 @@ public class DockService extends Service {
     private String splitPickerPackage;
     private Intent splitPickerIntent;
     private ComponentName splitPickerActivity;
+    private final Set<String> splitExcludedFloating = new HashSet<>();
     private LaserOverlay laserOverlay;
     private TranslateOverlay translateOverlay;
     private WindowManager.LayoutParams translateParams;
     private View translateToolbarView;
     private WindowManager.LayoutParams translateToolbarParams;
+    private final java.util.List<PinnedImageOverlay> pinnedOverlays = new java.util.ArrayList<>();
+    private final java.util.Map<PinnedImageOverlay, WindowManager.LayoutParams> pinnedParams =
+            new java.util.HashMap<>();
+    private static final int MAX_PINS = 5;
     private FloatingPulse floatingPulse;
     private final android.util.LruCache<Integer, Float> floatingScales = new android.util.LruCache<>(16);
     private int pulseRequest;
@@ -127,7 +132,10 @@ public class DockService extends Service {
             if (getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
             android.util.Log.d("PenDock", "Huawei stylus double tap");
             if (circleSelection != null) cancelCircleSearch();
-            else if (translateOverlay != null && !translateOverlay.isPaused()) cancelTranslateOverlay();
+            else if (translateOverlay != null && translateOverlay.isDoubleTapLocked()) {
+                translateOverlay.togglePauseFromDoubleTap();
+            }
+            else if (translateOverlay != null && !translateOverlay.isPaused()) translateOverlay.pauseIfActive();
             else if (splitPicker != null || splitTransitioning) return;
             else if (laserOverlay != null) cancelLaserOverlay();
             else if (menu != null) menu.dismiss();
@@ -258,9 +266,10 @@ public class DockService extends Service {
             stopSelf();
             return;
         }
-        WindowModeMonitor.FocusedApp focused = WindowModeMonitor.focusedApp();
-        Map<String, WindowModeMonitor.FloatingWindow> openFloating = WindowModeMonitor.floatingWindows();
-        Set<String> visibleApps = WindowModeMonitor.visibleAppPackages();
+        WindowModeMonitor.Snapshot snap = WindowModeMonitor.snapshot();
+        WindowModeMonitor.FocusedApp focused = snap.focused;
+        Map<String, WindowModeMonitor.FloatingWindow> openFloating = snap.floating;
+        Set<String> visibleApps = snap.visible;
         String foreground = focused != null && focused.activity != null
                 ? focused.activity.getPackageName() : null;
         if (useHover && exclusions.contains(foreground)) {
@@ -271,7 +280,7 @@ public class DockService extends Service {
         int blurDp = RingConfig.ringBlurDp(this);
         if (blurDp > 0 && Build.VERSION.SDK_INT >= 31
                 && !manager.isCrossWindowBlurEnabled() && CircleCaptureService.isReady()) {
-            CircleCaptureService.capture(frame ->
+            CircleCaptureService.captureFastForBlur(frame ->
                     attachMenu(request, useHover, focused, openFloating, visibleApps, frame));
             return;
         }
@@ -292,7 +301,8 @@ public class DockService extends Service {
             stopSelf();
             return;
         }
-        if (blurFrame != null && openFloating != null && !openFloating.isEmpty()
+        if (blurFrame != null && blurFrame.getConfig() != Bitmap.Config.HARDWARE
+                && openFloating != null && !openFloating.isEmpty()
                 && "HUAWEI".equalsIgnoreCase(Build.MANUFACTURER)) {
             for (Map.Entry<String, WindowModeMonitor.FloatingWindow> entry : openFloating.entrySet()) {
                 WindowModeMonitor.FloatingWindow fw = entry.getValue();
@@ -311,14 +321,15 @@ public class DockService extends Service {
         RadialMenu[] menuRef = new RadialMenu[1];
         RadialMenu opened = new RadialMenu(menuContext, bounds.exactCenterX(), bounds.exactCenterY(), useHover,
                 this::lockScreen, this::takeScreenshot, this::startCircleSearch, this::startLaserPointer,
-                this::startTranslate, () -> detach(menuRef[0]),
+                this::startTranslate, this::startPinToScreen, () -> detach(menuRef[0]),
                 entries, app -> openShortcut(app, focused, openFloating, visibleApps), "—",
                 activeTarget == null || alreadyWindowed ? null : () -> floatActive(activeTarget, focused),
                 alreadyWindowed,
                 activeTarget == null || alreadySplit || alreadyWindowed ? null : () -> splitActive(activeTarget, focused),
                 alreadySplit, blurFrame);
         menuRef[0] = opened;
-        int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+        int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
         int blurDp = RingConfig.ringBlurDp(this);
         boolean nativeBlur = blurFrame == null && blurDp > 0 && Build.VERSION.SDK_INT >= 31
                 && manager.isCrossWindowBlurEnabled();
@@ -391,11 +402,28 @@ public class DockService extends Service {
         int request = ++circleRequest;
         main.postDelayed(() -> {
             if (request != circleRequest || menu != null) return;
-            CircleCaptureService.capture(frame -> showCircleSelection(request, frame));
+            CircleCaptureService.capture(frame -> showCircleSelection(request, frame, false));
         }, 120);
     }
 
-    private void showCircleSelection(int request, Bitmap frame) {
+    private void startPinToScreen() {
+        detach();
+        if (Build.VERSION.SDK_INT < 30) {
+            Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!CircleCaptureService.isReady()) {
+            openForPermission(MainActivity.PERM_CIRCLE, "pin");
+            return;
+        }
+        int request = ++circleRequest;
+        main.postDelayed(() -> {
+            if (request != circleRequest || menu != null) return;
+            CircleCaptureService.capture(frame -> showCircleSelection(request, frame, true));
+        }, 120);
+    }
+
+    private void showCircleSelection(int request, Bitmap frame, boolean instantPin) {
         if (request != circleRequest || menu != null || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
             if (frame != null) frame.recycle();
             return;
@@ -409,10 +437,13 @@ public class DockService extends Service {
                 RingConfig.isCircleShareShown(this),
                 RingConfig.isCircleCopyShown(this),
                 RingConfig.isCircleSaveShown(this),
+                instantPin,
                 this::cancelCircleSearch, this::handleCircleAction);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_SECURE
+                        | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
                 PixelFormat.OPAQUE);
         params.setTitle("PenDock circle search");
         params.gravity = Gravity.TOP | Gravity.LEFT;
@@ -429,19 +460,25 @@ public class DockService extends Service {
         }
     }
 
-    private void handleCircleAction(CircleSelection.Action action, Bitmap crop) {
+    private void handleCircleAction(CircleSelection.Action action, Bitmap crop, Rect screenBounds) {
         cancelCircleSearch();
+        if (action == CircleSelection.Action.PIN) {
+            showPinnedOverlay(crop, screenBounds);
+            return;
+        }
         if (action == CircleSelection.Action.SAVE) {
             saveCircleToGallery(crop);
             return;
         }
-        int request = circleRequest;
+        dispatchCropAction(action, crop);
+    }
+
+    private void dispatchCropAction(CircleSelection.Action action, Bitmap crop) {
         background.execute(() -> {
             try {
                 Uri uri = CircleFiles.save(this, crop);
                 main.post(() -> {
-                    if (request != circleRequest || !running
-                            || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+                    if (!running || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
                     if (action == CircleSelection.Action.LENS) {
                         try {
                             LensShare.send(this, uri);
@@ -478,6 +515,86 @@ public class DockService extends Service {
                 crop.recycle();
             }
         });
+    }
+
+    private void showPinnedOverlay(Bitmap crop, Rect screenBounds) {
+        if (crop == null || crop.isRecycled()) return;
+        if (!Settings.canDrawOverlays(this)) {
+            crop.recycle();
+            return;
+        }
+        while (pinnedOverlays.size() >= MAX_PINS) {
+            removePinnedOverlay(pinnedOverlays.get(0));
+        }
+        PinnedImageOverlay pin = new PinnedImageOverlay(Appearance.localize(this), crop, screenBounds,
+                new PinnedImageOverlay.Host() {
+                    @Override public void onMove(PinnedImageOverlay view, int x, int y) {
+                        WindowManager.LayoutParams lp = pinnedParams.get(view);
+                        if (lp == null || manager == null) return;
+                        lp.x = x;
+                        lp.y = y;
+                        try {
+                            manager.updateViewLayout(view, lp);
+                        } catch (RuntimeException ignored) { }
+                    }
+
+                    @Override public void onSave(Bitmap copy) {
+                        saveCircleToGallery(copy);
+                    }
+
+                    @Override public void onCopy(Bitmap copy) {
+                        dispatchCropAction(CircleSelection.Action.COPY, copy);
+                    }
+
+                    @Override public void onShare(Bitmap copy) {
+                        dispatchCropAction(CircleSelection.Action.SHARE, copy);
+                    }
+
+                    @Override public void onClose(PinnedImageOverlay view) {
+                        removePinnedOverlay(view);
+                    }
+                });
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        lp.setTitle("PenDock pin");
+        lp.gravity = Gravity.TOP | Gravity.START;
+        lp.x = pin.windowX();
+        lp.y = pin.windowY();
+        if (Build.VERSION.SDK_INT >= 30) {
+            lp.setFitInsetsTypes(0);
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        try {
+            manager.addView(pin, lp);
+            pinnedOverlays.add(pin);
+            pinnedParams.put(pin, lp);
+            if (pinnedOverlays.size() == 1) {
+                Toast.makeText(this, Appearance.text(this, R.string.pin_hint_long_press), Toast.LENGTH_SHORT).show();
+            }
+        } catch (WindowManager.BadTokenException | SecurityException unavailable) {
+            pin.destroy();
+        }
+    }
+
+    private void removePinnedOverlay(PinnedImageOverlay pin) {
+        if (pin == null) return;
+        pinnedOverlays.remove(pin);
+        pinnedParams.remove(pin);
+        removeOverlay(pin);
+        pin.destroy();
+    }
+
+    private void clearAllPinnedOverlays() {
+        for (PinnedImageOverlay pin : new java.util.ArrayList<>(pinnedOverlays)) {
+            removePinnedOverlay(pin);
+        }
     }
 
     private void showLensUnavailable() {
@@ -594,25 +711,44 @@ public class DockService extends Service {
             @Override public void onRequestResume() {
                 if (translateOverlay != ref[0] || translateParams == null || manager == null) return;
                 int resumeReq = ++translateRequest;
-                // Capture immediately without hiding the persistent toolbar so it never blinks.
-                CircleCaptureService.capture(fresh -> {
+                View bar = translateToolbarView;
+                Runnable doCapture = () -> {
                     if (resumeReq != translateRequest || translateOverlay != ref[0] || menu != null) {
-                        if (fresh != null) fresh.recycle();
+                        if (bar != null) bar.animate().alpha(1f).setDuration(140).start();
                         return;
                     }
-                    if (fresh == null) {
-                        Toast.makeText(DockService.this, Appearance.text(DockService.this, R.string.capture_failed),
-                                Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    translateParams.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
-                    ref[0].setVisibility(View.VISIBLE);
-                    try {
-                        manager.updateViewLayout(ref[0], translateParams);
-                    } catch (IllegalArgumentException ignored) { }
-                    ref[0].resumeWithFrame(fresh);
-                    ref[0].requestFocus();
-                });
+                    CircleCaptureService.capture(fresh -> {
+                        if (bar != null && bar.isAttachedToWindow()) {
+                            bar.animate().cancel();
+                            bar.animate().alpha(1f).setDuration(150).start();
+                        }
+                        if (resumeReq != translateRequest || translateOverlay != ref[0] || menu != null) {
+                            if (fresh != null) fresh.recycle();
+                            return;
+                        }
+                        if (fresh == null) {
+                            Toast.makeText(DockService.this, Appearance.text(DockService.this, R.string.capture_failed),
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        translateParams.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+                        ref[0].setVisibility(View.VISIBLE);
+                        try {
+                            manager.updateViewLayout(ref[0], translateParams);
+                        } catch (IllegalArgumentException ignored) { }
+                        ref[0].resumeWithFrame(fresh);
+                        ref[0].requestFocus();
+                    });
+                };
+                if (bar != null && bar.isAttachedToWindow()) {
+                    bar.animate().cancel();
+                    bar.animate().alpha(0f).setDuration(85)
+                            .withEndAction(() -> main.postDelayed(doCapture, 24))
+                            .start();
+                } else {
+                    doCapture.run();
+                }
             }
 
             @Override public void onClose() {
@@ -622,7 +758,8 @@ public class DockService extends Service {
         ref[0] = overlay;
         WindowManager.LayoutParams stageParams = new WindowManager.LayoutParams(-1, -1,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
                 PixelFormat.TRANSLUCENT);
         stageParams.setTitle("PenDock translate stage");
         stageParams.gravity = Gravity.TOP | Gravity.LEFT;
@@ -826,6 +963,9 @@ public class DockService extends Service {
         }
         // Rule 1: when no app is open (Home) or another app is floating, pop the selected app up directly
         // into the primary split half and show the second-app picker.
+        splitExcludedFloating.clear();
+        if (openFloating != null) splitExcludedFloating.addAll(openFloating.keySet());
+        splitExcludedFloating.addAll(WindowModeMonitor.floatingPackages());
         int request = ++splitRequest;
         Intent primary = getPackageManager().getLaunchIntentForPackage(app.id);
         if (primary == null) {
@@ -1116,6 +1256,9 @@ public class DockService extends Service {
             detach();
             return;
         }
+        // Snapshot open floating apps BEFORE switchToHome() hides them during the split transition.
+        splitExcludedFloating.clear();
+        splitExcludedFloating.addAll(WindowModeMonitor.floatingPackages());
         String primaryPackage = selection.activity == null ? null : selection.activity.getPackageName();
         Intent primaryCopy = new Intent(requested);
         ComponentName primaryActivity = selection.activity;
@@ -1305,7 +1448,10 @@ public class DockService extends Service {
                 : WindowManager.LayoutParams.MATCH_PARENT;
         int height = landscape ? WindowManager.LayoutParams.MATCH_PARENT
                 : splitPickerDimension(bounds, false, primaryPackage, seamGuard);
-        Set<String> excluded = new HashSet<>(WindowModeMonitor.floatingPackages());
+        Set<String> floatingSet = new HashSet<>(WindowModeMonitor.floatingPackages());
+        floatingSet.addAll(splitExcludedFloating);
+        if (primaryPackage != null) floatingSet.remove(primaryPackage);
+        Set<String> excluded = new HashSet<>(floatingSet);
         if (primaryPackage != null) excluded.add(primaryPackage);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(width, height,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -1320,13 +1466,15 @@ public class DockService extends Service {
             params.setFitInsetsTypes(WindowInsets.Type.ime());
             params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
         }
-        Runnable onClose = () -> {
+        List<String> floatingToRestore = new java.util.ArrayList<>(floatingSet);
+        java.util.function.Consumer<Boolean> closePicker = restoreFloating -> {
             SplitAppPicker closing = splitPicker;
             int closeRequest = ++splitRequest;
             splitPicker = null;
             splitPickerPackage = null;
             splitPickerIntent = null;
             splitPickerActivity = null;
+            splitExcludedFloating.clear();
             if (closing != null) {
                 params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
@@ -1336,15 +1484,27 @@ public class DockService extends Service {
             }
             if (primaryIntent == null) {
                 if (closing != null) removeOverlay(closing);
-                return;
+            } else {
+                int closingW = landscape ? params.width : bounds.width();
+                int closingH = landscape ? bounds.height() : params.height;
+                expandPrimaryToFullscreen(closeRequest, closing, primaryIntent, primaryActivity,
+                        bounds, landscape, closingW, closingH);
             }
-            int closingW = landscape ? params.width : bounds.width();
-            int closingH = landscape ? bounds.height() : params.height;
-            expandPrimaryToFullscreen(closeRequest, closing, primaryIntent, primaryActivity,
-                    bounds, landscape, closingW, closingH);
+            if (restoreFloating && !floatingToRestore.isEmpty()) {
+                main.postDelayed(() -> {
+                    if (!running || closeRequest != splitRequest || splitPicker != null) return;
+                    for (String pkg : floatingToRestore) {
+                        Intent bringFront = getPackageManager().getLaunchIntentForPackage(pkg);
+                        if (bringFront == null) continue;
+                        bringFront.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        launch(bringFront, floatingKeepBoundsOptions());
+                    }
+                }, 320);
+            }
         };
+        Runnable onClose = () -> closePicker.accept(true);
         SplitAppPicker picker = new SplitAppPicker(Appearance.localize(this), shortcuts, entries,
-                WindowModeMonitor.recentPackages(this), excluded, background,
+                WindowModeMonitor.recentPackages(this), excluded, floatingSet, background,
                 seamGuard, landscape,
                 onClose, onClose, chosen -> {
             cancelSplitPicker();
@@ -1357,6 +1517,23 @@ public class DockService extends Service {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
             WindowModeMonitor.recordRecent(this, chosen.id);
             launch(intent, splitPopupOptions(true));
+        }, floatingChosen -> {
+            closePicker.accept(false);
+            Intent bringFront = getPackageManager().getLaunchIntentForPackage(floatingChosen.id);
+            if (bringFront == null) return;
+            bringFront.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            main.postDelayed(() -> {
+                if (!running) return;
+                launch(bringFront, floatingKeepBoundsOptions());
+                main.postDelayed(() -> {
+                    if (!running || splitTransitioning) return;
+                    WindowModeMonitor.FloatingWindow stillFloating =
+                            WindowModeMonitor.findFloatingWindow(floatingChosen.id);
+                    if (stillFloating != null && !stillFloating.bounds.isEmpty()) {
+                        showFloatingPulse(stillFloating.windowId, floatingChosen.id, stillFloating.bounds, true);
+                    }
+                }, 220);
+            }, 320);
         });
         if (animateIn) {
             picker.setTranslationX(landscape ? (bounds.width() / 2f) : 0f);
@@ -2176,6 +2353,7 @@ public class DockService extends Service {
         main.removeCallbacksAndMessages(null);
         cancelCircleSearch();
         cancelTranslateOverlay();
+        clearAllPinnedOverlays();
         cancelSplitPicker();
         cancelLaserOverlay();
         cancelFloatingPulse();

@@ -119,6 +119,64 @@ public class WindowModeMonitor extends AccessibilityService {
         if (connected != null) connected.configure();
     }
 
+    static final class Snapshot {
+        final FocusedApp focused;
+        final Map<String, FloatingWindow> floating;
+        final Set<String> visible;
+
+        Snapshot(FocusedApp focused, Map<String, FloatingWindow> floating, Set<String> visible) {
+            this.focused = focused;
+            this.floating = floating;
+            this.visible = visible;
+        }
+    }
+
+    /** Reads focused app, floating windows, and visible packages in a single getWindows() IPC pass. */
+    static Snapshot snapshot() {
+        if (connected == null || !connected.tracking) {
+            return new Snapshot(null, new HashMap<>(), new HashSet<>());
+        }
+        return connected.readSnapshot();
+    }
+
+    private Snapshot readSnapshot() {
+        FocusedApp focused = null;
+        Map<String, FloatingWindow> floating = new HashMap<>();
+        Set<String> visible = new HashSet<>();
+        List<AccessibilityWindowInfo> windows = getWindows();
+        try {
+            Rect display = usableDisplay();
+            for (AccessibilityWindowInfo window : windows) {
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                String pkg = windowPackageName(window);
+                if (pkg != null && !isHomePackage(pkg)) visible.add(pkg);
+
+                Rect bounds = new Rect();
+                window.getBoundsInScreen(bounds);
+                if (bounds.isEmpty()) continue;
+                boolean spansWidth = spansAxis(bounds.left, bounds.right, display.left, display.right);
+                boolean spansHeight = spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
+                boolean spansDisplay = spansWidth || spansHeight;
+
+                if (!window.isInPictureInPictureMode() && !spansDisplay) {
+                    if (pkg != null && !floating.containsKey(pkg)) {
+                        floating.put(pkg, new FloatingWindow(window.getId(), bounds));
+                    }
+                }
+                if (focused == null && window.isFocused()) {
+                    boolean windowed = window.isInPictureInPictureMode() || !spansDisplay;
+                    boolean split = !windowed && (spansWidth != spansHeight)
+                            && isDockedSplit(bounds, display, spansWidth);
+                    App app = activities.get(window.getId());
+                    focused = new FocusedApp(app, windowed, split, bounds);
+                }
+            }
+            return new Snapshot(focused, floating, visible);
+        } finally {
+            for (AccessibilityWindowInfo window : windows) window.recycle();
+        }
+    }
+
     static FocusedApp focusedApp() {
         return connected == null || !connected.tracking ? null : connected.readFocusedApp();
     }
@@ -292,8 +350,8 @@ public class WindowModeMonitor extends AccessibilityService {
                 boolean spansWidth = spansAxis(bounds.left, bounds.right, display.left, display.right);
                 boolean spansHeight = spansAxis(bounds.top, bounds.bottom, display.top, display.bottom);
                 if (!spansWidth && !spansHeight) {
-                    App app = activities.get(window.getId());
-                    if (app != null && app.activity != null) result.add(app.activity.getPackageName());
+                    String pkg = windowPackageName(window);
+                    if (pkg != null && !isHomePackage(pkg)) result.add(pkg);
                 }
             }
             return result;

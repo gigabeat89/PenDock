@@ -31,10 +31,11 @@ final class SplitAppPicker extends FrameLayout {
     private boolean detached;
 
     SplitAppPicker(Context context, Shortcuts shortcuts, List<Shortcuts.Entry> pinnedEntries,
-            List<String> recentPackages, Set<String> excludedPackages, ExecutorService background,
-            int seamGuard, boolean landscape,
+            List<String> recentPackages, Set<String> excludedPackages, Set<String> floatingPackages,
+            ExecutorService background, int seamGuard, boolean landscape,
             Runnable onClose, Runnable cancel,
-            Consumer<Shortcuts.Entry> onPick) {
+            Consumer<Shortcuts.Entry> onPick,
+            Consumer<Shortcuts.Entry> onFloatingPick) {
         super(context);
         this.colors = Ui.colors(context);
         this.cancel = cancel;
@@ -160,6 +161,47 @@ final class SplitAppPicker extends FrameLayout {
         panel.addView(empty, new LinearLayout.LayoutParams(-1, 0, 1));
         results.setEmptyView(empty);
 
+        if (floatingPackages != null && !floatingPackages.isEmpty() && onFloatingPick != null) {
+            LinearLayout floatingSlot = Ui.column(context);
+            floatingSlot.setVisibility(GONE);
+            panel.addView(floatingSlot, new LinearLayout.LayoutParams(-1, -2));
+
+            List<String> floatPkgs = new ArrayList<>();
+            for (String pkg : floatingPackages) {
+                if (pkg != null && !pkg.isEmpty() && !pkg.equals(context.getPackageName())) {
+                    floatPkgs.add(pkg);
+                }
+            }
+            if (!floatPkgs.isEmpty()) {
+                List<Shortcuts.Entry> fastFloat = new ArrayList<>();
+                boolean allFastFloat = true;
+                for (String pkg : floatPkgs) {
+                    Shortcuts.Entry cached = shortcuts.cachedDescribe(pkg);
+                    if (cached == null) {
+                        allFastFloat = false;
+                        break;
+                    }
+                    fastFloat.add(cached);
+                }
+                if (allFastFloat && !fastFloat.isEmpty()) {
+                    populateFloatingFooter(context, floatingSlot, fastFloat, onFloatingPick);
+                } else if (!background.isShutdown()) {
+                    background.execute(() -> {
+                        List<Shortcuts.Entry> loadedFloat = new ArrayList<>();
+                        for (String pkg : floatPkgs) {
+                            if (context.getPackageManager().getLaunchIntentForPackage(pkg) == null) continue;
+                            loadedFloat.add(shortcuts.describe(pkg));
+                        }
+                        if (loadedFloat.isEmpty()) return;
+                        post(() -> {
+                            if (detached) return;
+                            populateFloatingFooter(context, floatingSlot, loadedFloat, onFloatingPick);
+                        });
+                    });
+                }
+            }
+        }
+
         List<Shortcuts.Entry> cachedAll = shortcuts.cachedAvailableExcept(excludedPackages);
         List<Shortcuts.Entry> allApps = cachedAll != null ? new ArrayList<>(cachedAll) : new ArrayList<>();
         boolean[] loading = {cachedAll == null};
@@ -211,6 +253,56 @@ final class SplitAppPicker extends FrameLayout {
                 outerMargin,
                 outerMargin);
         addView(panel, cardParams);
+    }
+
+    private void populateFloatingFooter(Context context, LinearLayout slot,
+            List<Shortcuts.Entry> apps, Consumer<Shortcuts.Entry> onFloatingPick) {
+        slot.removeAllViews();
+        View divider = new View(context);
+        divider.setBackgroundColor(colors.border);
+        LinearLayout.LayoutParams divP = new LinearLayout.LayoutParams(-1, dp(1));
+        divP.topMargin = dp(8);
+        slot.addView(divider, divP);
+
+        TextView heading = Ui.text(context, context.getString(R.string.split_floating_now), 11, colors.muted, true);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
+        hp.topMargin = dp(8);
+        slot.addView(heading, hp);
+
+        HorizontalScrollView scroll = new HorizontalScrollView(context);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = new LinearLayout(context);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        for (int i = 0; i < apps.size(); i++) {
+            Shortcuts.Entry entry = apps.get(i);
+            LinearLayout chip = new LinearLayout(context);
+            chip.setGravity(Gravity.CENTER_VERTICAL);
+            chip.setPadding(dp(10), dp(6), dp(12), dp(6));
+            chip.setBackground(Ui.pressable(context, colors.accentWash, 12, colors.accent));
+            chip.setFocusable(true);
+            chip.setOnClickListener(v -> onFloatingPick.accept(entry));
+
+            ImageView icon = new ImageView(context);
+            icon.setImageDrawable(entry.icon);
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            chip.addView(icon, new LinearLayout.LayoutParams(dp(20), dp(20)));
+
+            TextView label = Ui.text(context, entry.label, 12, colors.accent, true);
+            label.setSingleLine(true);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMarginStart(dp(6));
+            chip.addView(label, lp);
+
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2);
+            if (i > 0) cp.setMarginStart(dp(8));
+            row.addView(chip, cp);
+        }
+        scroll.addView(row, new LayoutParams(-2, -2));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
+        sp.topMargin = dp(6);
+        slot.addView(scroll, sp);
+        slot.setVisibility(VISIBLE);
     }
 
     private LinearLayout buildStripSection(Context context, int headingRes,

@@ -31,7 +31,7 @@ final class RadialMenu extends FrameLayout {
     private static final PathInterpolator OPEN = new PathInterpolator(.22f, .55f, .32f, 1f);
     private static final PathInterpolator CLOSE = new PathInterpolator(.35f, 0f, .85f, .52f);
     private static final int HUB_RADIUS_DP = 44;
-    private static final int OPEN_DURATION_MS = 290;
+    private static final int OPEN_DURATION_MS = 220;
 
     private final String[] labels;
     private final View[] buttons;
@@ -83,24 +83,24 @@ final class RadialMenu extends FrameLayout {
 
     RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
             Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode,
-            Runnable translateScreen, Runnable close,
+            Runnable translateScreen, Runnable pinScreen, Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             Bitmap blurFrame) {
         this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, laserMode,
-                translateScreen, close, entries, launch, battery, floatActive, alreadyWindowed,
+                translateScreen, pinScreen, close, entries, launch, battery, floatActive, alreadyWindowed,
                 splitActive, alreadySplit, blurFrame, false);
     }
 
     static RadialMenu preview(Context context, List<Shortcuts.Entry> entries) {
         Runnable sample = () -> { };
-        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample, sample,
+        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample, sample, sample,
                 entries, app -> { }, "—", sample, false, sample, false, null, true);
     }
 
     private RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
             Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode,
-            Runnable translateScreen, Runnable close,
+            Runnable translateScreen, Runnable pinScreen, Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             Bitmap blurFrame, boolean preview) {
@@ -142,12 +142,18 @@ final class RadialMenu extends FrameLayout {
         int blurDp = RingConfig.ringBlurDp(context);
         if (!preview && blurFrame != null && blurDp > 0 && Build.VERSION.SDK_INT >= 31) {
             Paint framePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+            android.graphics.Rect dest = new android.graphics.Rect();
+            android.view.WindowManager wm = context.getSystemService(android.view.WindowManager.class);
+            android.graphics.Rect displayBounds = wm.getCurrentWindowMetrics().getBounds();
             blurLayer = new View(context) {
                 @Override protected void onDraw(Canvas canvas) {
                     Bitmap frame = RadialMenu.this.blurFrame;
                     if (frame == null || frame.isRecycled()) return;
                     getLocationOnScreen(screenOrigin);
-                    canvas.drawBitmap(frame, -screenOrigin[0], -screenOrigin[1], framePaint);
+                    dest.set(-screenOrigin[0], -screenOrigin[1],
+                            -screenOrigin[0] + displayBounds.width(),
+                            -screenOrigin[1] + displayBounds.height());
+                    canvas.drawBitmap(frame, null, dest, framePaint);
                 }
             };
             float radius = dp(blurDp);
@@ -201,6 +207,7 @@ final class RadialMenu extends FrameLayout {
                         break;
                     case LASER_POINTER: action = laserMode; break;
                     case TRANSLATE: action = translateScreen; break;
+                    case PIN_SCREEN: action = pinScreen; break;
                 }
             }
             addButton(index, entry.icon, label, action);
@@ -380,7 +387,7 @@ final class RadialMenu extends FrameLayout {
 
     private void prepareReveal() {
         removeCallbacks(fallback);
-        postDelayed(fallback, waitingForHover ? 270 : 0);
+        postDelayed(fallback, waitingForHover ? (requireHover ? 180 : 90) : 0);
     }
 
     @Override public boolean dispatchHoverEvent(MotionEvent event) {

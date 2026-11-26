@@ -186,6 +186,7 @@
     <string name="split_pick_title">เลือกแอพวางคู่กัน</string>
     <string name="split_pinned">จากวงเมนูของคุณ</string>
     <string name="split_recent">แอพล่าสุด</string>
+    <string name="split_floating_now">กำลังเปิดหน้าต่างลอย — ปิดหน้าต่างลอยก่อนจึงจะเลือกแบ่งหน้าจอได้ (แตะเพื่อสลับไปดู)</string>
     <string name="laser_tool">ตัวชี้เลเซอร์</string>
     <string name="laser_color">เปลี่ยนสีเลเซอร์</string>
     <string name="laser_overlay_failed">เปิดตัวชี้เลเซอร์บนหน้านี้ไม่ได้</string>
@@ -209,6 +210,9 @@
     <string name="translate_pause">พักหน้าแปลเพื่อเลื่อนจอ</string>
     <string name="translate_resume">กลับมาแปลหน้าจอนี้</string>
     <string name="translate_peek">กดค้างเพื่อดูต้นฉบับ</string>
+    <string name="translate_lock_double_tap">ล็อกแตะปากกา 2 ครั้งเพื่อสลับหยุด/แปล</string>
+    <string name="translate_lock_on_toast">ล็อกแตะปากกา 2 ครั้งเป็นสลับ หยุด/แปล แล้ว</string>
+    <string name="translate_lock_off_toast">ปลดล็อกแตะปากกา 2 ครั้งแล้ว</string>
     <string name="translate_overlay_failed">เปิดหน้าแปลภาษาบนหน้านี้ไม่ได้</string>
     <string name="translate_permission_message">เปิดบริการ PenDock · วงเพื่อค้นหา ในการช่วยเหลือพิเศษก่อนเพื่อจับภาพสำหรับแปลภาษา</string>
     <string name="ocr_models_title">โมเดลอ่านข้อความ (OCR)</string>
@@ -238,6 +242,13 @@
     <string name="circle_action_share">แชร์</string>
     <string name="circle_action_copy">คัดลอก</string>
     <string name="circle_action_save">บันทึก</string>
+    <string name="circle_action_pin">ปักหมุด</string>
+    <string name="pin_tool">ปักหมุดหน้าจอ</string>
+    <string name="pin_prompt">ลากกรอบเลือกบริเวณที่ต้องการปักหมุด</string>
+    <string name="pin_permission_message">เปิดสิทธิ์ PenDock ใน Accessibility เพื่อใช้งานปักหมุดหน้าจอ</string>
+    <string name="pin_opacity">ปรับความโปร่งใส</string>
+    <string name="pin_resize">ปรับขนาดภาพปักหมุด</string>
+    <string name="pin_hint_long_press">ปักหมุดแล้ว — กดค้างที่ภาพเพื่อ Save, Copy หรือ Share</string>
     <string name="circle_copied">คัดลอกรูปภาพลงคลิปบอร์ดแล้ว</string>
     <string name="circle_copy_failed">คัดลอกรูปภาพไม่สำเร็จ</string>
     <string name="circle_share_title">แชร์ส่วนที่วง</string>
