@@ -8,6 +8,17 @@ import java.util.Locale;
 final class PenInput {
     private static final String PEN_ONLY_MENU = "pen_only_menu";
     private static final String REQUIRE_NEAR_SCREEN = "require_near_screen";
+    private static final String HMOS_SPACE_RING = "hmos_space_ring";
+
+    static boolean isHmosSpaceRingEnabled(Context context) {
+        return context.getSharedPreferences("tools", Context.MODE_PRIVATE)
+                .getBoolean(HMOS_SPACE_RING, false);
+    }
+
+    static void setHmosSpaceRingEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences("tools", Context.MODE_PRIVATE).edit()
+                .putBoolean(HMOS_SPACE_RING, enabled).apply();
+    }
 
     static boolean isPenOnlyMenu(Context context) {
         return context.getSharedPreferences("tools", Context.MODE_PRIVATE)

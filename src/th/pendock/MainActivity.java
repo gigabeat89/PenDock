@@ -96,7 +96,7 @@ public class MainActivity extends Activity {
         setTheme(Appearance.isDark(this) ? R.style.AppThemeDark : R.style.AppTheme);
         super.onCreate(state);
         appliedTheme = Appearance.theme(this);
-        appliedLanguage = Appearance.language(this);
+        appliedLanguage = Appearance.languagePref(this);
         colors = Ui.colors(this);
         shortcuts = new Shortcuts(this);
         exclusions = new ExcludedApps(this);
@@ -217,7 +217,7 @@ public class MainActivity extends Activity {
 
     @Override public void onResume() {
         super.onResume();
-        if (!appliedTheme.equals(Appearance.theme(this)) || !appliedLanguage.equals(Appearance.language(this))) {
+        if (!appliedTheme.equals(Appearance.theme(this)) || !appliedLanguage.equals(Appearance.languagePref(this))) {
             recreate();
             return;
         }
@@ -608,6 +608,12 @@ public class MainActivity extends Activity {
         Switch proximity = featureSwitch(R.string.pen_near_only, PenInput.requiresNearScreen(this));
         proximity.setOnCheckedChangeListener((button, enabled) -> PenInput.setRequiresNearScreen(this, enabled));
         addRow(pen, proximity);
+        Switch hmosSpace = featureSwitch(R.string.hmos_space_ring, PenInput.isHmosSpaceRingEnabled(this));
+        hmosSpace.setOnCheckedChangeListener((button, enabled) -> {
+            PenInput.setHmosSpaceRingEnabled(this, enabled);
+            WindowModeMonitor.refreshTracking();
+        });
+        addRow(pen, hmosSpace);
         Switch autoStart = featureSwitch(R.string.auto_start_boot, RingConfig.isAutoStart(this));
         autoStart.setOnCheckedChangeListener((button, enabled) -> RingConfig.setAutoStart(this, enabled));
         addRow(pen, autoStart);

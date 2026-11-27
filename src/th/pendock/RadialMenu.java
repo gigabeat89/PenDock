@@ -116,7 +116,7 @@ final class RadialMenu extends FrameLayout {
         this.fallbackX = fallbackX;
         this.fallbackY = fallbackY;
         this.close = close;
-        penOnly = !preview && PenInput.isPenOnlyMenu(context);
+        penOnly = !preview && useHover && PenInput.isPenOnlyMenu(context);
         requireHover = !preview && useHover && PenInput.requiresNearScreen(context);
         int count = entries.size();
         actions = new Runnable[count];
@@ -573,7 +573,7 @@ final class RadialMenu extends FrameLayout {
 
     private void revealAtCenter() {
         if (requireHover) {
-            android.util.Log.d("PenDock", "Skipped pen menu without stylus hover");
+            DiagLog.log("Menu", "Skipped menu: requireNearScreen=true & no stylus hover");
             dismiss();
             return;
         }

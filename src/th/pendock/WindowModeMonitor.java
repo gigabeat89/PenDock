@@ -13,6 +13,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.SystemClock;
 import android.util.LruCache;
+import android.view.KeyEvent;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.WindowMetrics;
@@ -31,6 +32,10 @@ import java.util.Set;
 public class WindowModeMonitor extends AccessibilityService {
     interface FloatingPingListener {
         void onFloatingWindowPinged(int windowId, String packageName, Rect rawBounds);
+    }
+
+    interface KeyTriggerListener {
+        void onHmosSpaceTriggered();
     }
 
     static final class FloatingWindow {
@@ -53,6 +58,9 @@ public class WindowModeMonitor extends AccessibilityService {
     private static boolean recentLoaded;
     private static WindowModeMonitor connected;
     private static volatile FloatingPingListener floatingPingListener;
+    private static volatile KeyTriggerListener keyTriggerListener;
+    private boolean metaKeyHeld;
+    private boolean consumedMetaSpace;
 
     private final LruCache<Integer, App> activities = new LruCache<>(32);
     private final Set<Integer> homeClickFloatingIds = new HashSet<>();
@@ -75,6 +83,10 @@ public class WindowModeMonitor extends AccessibilityService {
 
     static void setFloatingPingListener(FloatingPingListener listener) {
         floatingPingListener = listener;
+    }
+
+    static void setKeyTriggerListener(KeyTriggerListener listener) {
+        keyTriggerListener = listener;
     }
 
     static void recordRecent(Context context, String packageName) {
@@ -373,8 +385,42 @@ public class WindowModeMonitor extends AccessibilityService {
         info.eventTypes = tracking ? AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 | AccessibilityEvent.TYPE_WINDOWS_CHANGED
                 | AccessibilityEvent.TYPE_VIEW_CLICKED : 0;
+        if (PenInput.isHmosSpaceRingEnabled(this)) {
+            info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        } else {
+            info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+            metaKeyHeld = false;
+            consumedMetaSpace = false;
+        }
         setServiceInfo(info);
         if (tracking) seedFocusState();
+    }
+
+    @Override protected boolean onKeyEvent(KeyEvent event) {
+        if (event == null || !PenInput.isHmosSpaceRingEnabled(this)) return false;
+        int code = event.getKeyCode();
+        int action = event.getAction();
+        if (code == KeyEvent.KEYCODE_ALT_LEFT || code == KeyEvent.KEYCODE_ALT_RIGHT) {
+            metaKeyHeld = (action == KeyEvent.ACTION_DOWN);
+            if (!metaKeyHeld) consumedMetaSpace = false;
+            return false;
+        }
+        if (code == KeyEvent.KEYCODE_SPACE) {
+            boolean alt = event.isAltPressed() || metaKeyHeld;
+            if (action == KeyEvent.ACTION_DOWN && alt) {
+                if (event.getRepeatCount() == 0) {
+                    consumedMetaSpace = true;
+                    KeyTriggerListener listener = keyTriggerListener;
+                    if (listener != null) listener.onHmosSpaceTriggered();
+                }
+                return true;
+            }
+            if (action == KeyEvent.ACTION_UP && (consumedMetaSpace || alt)) {
+                consumedMetaSpace = false;
+                return true;
+            }
+        }
+        return false;
     }
 
     private void seedFocusState() {

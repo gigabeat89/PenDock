@@ -76,11 +76,13 @@ public class SettingsActivity extends Activity {
         View divider = new View(this);
         divider.setBackgroundColor(colors.border);
         preferences.addView(divider, new LinearLayout.LayoutParams(-1, Ui.dp(this, 1)));
-        addDropdown(preferences, R.string.language, Appearance.LANGUAGE, Appearance.language(this),
-                new String[] {"ภาษาไทย", "English"}, new String[] {"th", "en"});
+        addDropdown(preferences, R.string.language, Appearance.LANGUAGE, Appearance.languagePref(this),
+                new String[] {getString(R.string.theme_system), "ภาษาไทย", "English"},
+                new String[] {Appearance.SYSTEM, "th", "en"});
         add(page, preferences, 14);
         add(page, ocrModelsCard(), 14);
         add(page, termsCard(), 14);
+        add(page, diagnosticsCard(), 14);
         add(page, contactCard(), 14);
         setContentView(scroll);
     }
@@ -358,6 +360,174 @@ public class SettingsActivity extends Activity {
         }
         new AlertDialog.Builder(this).setTitle(R.string.license_action)
                 .setMessage(license.toString().trim()).setPositiveButton(R.string.close, null).show();
+    }
+
+    private LinearLayout diagnosticsCard() {
+        LinearLayout box = card();
+        box.addView(heading(R.string.diag_title));
+        add(box, Ui.text(this, getString(R.string.diag_detail), 13, colors.muted, false), 6);
+        add(box, Ui.action(this, getString(R.string.diag_open), false, this::showDiagnosticsDialog), 12);
+        return box;
+    }
+
+    private void showDiagnosticsDialog() {
+        java.util.List<String> probeEvents = new java.util.ArrayList<>();
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US);
+
+        LinearLayout panel = Ui.column(this);
+        int pad = Ui.dp(this, 18);
+        panel.setPadding(pad, pad, pad, pad);
+        panel.setBackground(Ui.shape(this, colors.background, 18));
+
+        panel.addView(Ui.text(this, getString(R.string.diag_title), 19, colors.text, true));
+
+        TextView probeBanner = Ui.text(this, getString(R.string.diag_probe_waiting), 13, colors.accent, true);
+        probeBanner.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        probeBanner.setBackground(Ui.border(this, colors.accentWash, 12, colors.accent));
+        LinearLayout.LayoutParams bannerP = new LinearLayout.LayoutParams(-1, -2);
+        bannerP.topMargin = Ui.dp(this, 10);
+        panel.addView(probeBanner, bannerP);
+
+        ScrollView logScroll = new ScrollView(this);
+        logScroll.setBackground(Ui.border(this, colors.surface, 12, colors.border));
+        logScroll.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        TextView logText = Ui.text(this, "", 11, colors.text, false);
+        logText.setTypeface(android.graphics.Typeface.MONOSPACE);
+        logText.setTextIsSelectable(true);
+        logScroll.addView(logText, new ScrollView.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams scrollP = new LinearLayout.LayoutParams(-1, 0, 1);
+        scrollP.topMargin = Ui.dp(this, 10);
+        panel.addView(logScroll, scrollP);
+
+        Runnable refreshLog = () -> {
+            String report = DiagLog.buildReport(SettingsActivity.this, probeEvents);
+            logText.setText(report);
+        };
+        refreshLog.run();
+
+        java.util.function.Consumer<String> recordProbe = summary -> runOnUiThread(() -> {
+            String stamp = fmt.format(new java.util.Date()) + " " + summary;
+            probeEvents.add(stamp);
+            if (probeEvents.size() > 30) probeEvents.remove(0);
+            probeBanner.setText(getString(R.string.diag_probe_detected, summary));
+            probeBanner.setTextColor(colors.pick(0xff1b624e, 0xffa0e1c8));
+            probeBanner.setBackground(Ui.border(this,
+                    colors.pick(0xffe2f1e9, 0xff23443e), 12,
+                    colors.pick(0xff1b624e, 0xffa0e1c8)));
+            refreshLog.run();
+        });
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        LinearLayout.LayoutParams footP = new LinearLayout.LayoutParams(-1, -2);
+        footP.topMargin = Ui.dp(this, 12);
+
+        TextView copyBtn = Ui.action(this, getString(R.string.diag_copy), false, () -> {
+            String report = DiagLog.buildReport(SettingsActivity.this, probeEvents);
+            android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("PenDock Diagnostics", report));
+                Toast.makeText(this, R.string.diag_copied, Toast.LENGTH_SHORT).show();
+            }
+        });
+        footer.addView(copyBtn, new LinearLayout.LayoutParams(-2, -2));
+
+        TextView shareBtn = Ui.action(this, getString(R.string.diag_share), false, () -> {
+            String report = DiagLog.buildReport(SettingsActivity.this, probeEvents);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_EMAIL, new String[] {SUPPORT_EMAIL});
+            send.putExtra(Intent.EXTRA_SUBJECT, "PenDock Diagnostics (" + android.os.Build.MODEL + ")");
+            send.putExtra(Intent.EXTRA_TEXT, report);
+            try {
+                startActivity(Intent.createChooser(send, getString(R.string.diag_share)));
+            } catch (ActivityNotFoundException ignored) { }
+        });
+        LinearLayout.LayoutParams shareP = new LinearLayout.LayoutParams(-2, -2);
+        shareP.setMarginStart(Ui.dp(this, 8));
+        footer.addView(shareBtn, shareP);
+
+        TextView emailBtn = Ui.action(this, getString(R.string.diag_email), true, () -> {
+            String report = DiagLog.buildReport(SettingsActivity.this, probeEvents);
+            String subject = "PenDock Diagnostics (" + android.os.Build.MODEL + ")";
+            Uri mailUri = Uri.parse("mailto:" + SUPPORT_EMAIL
+                    + "?subject=" + Uri.encode(subject)
+                    + "&body=" + Uri.encode(report));
+            Intent mail = new Intent(Intent.ACTION_SENDTO, mailUri);
+            try {
+                startActivity(mail);
+            } catch (ActivityNotFoundException noMailApp) {
+                Intent fallback = new Intent(Intent.ACTION_SEND);
+                fallback.setType("message/rfc822");
+                fallback.putExtra(Intent.EXTRA_EMAIL, new String[] {SUPPORT_EMAIL});
+                fallback.putExtra(Intent.EXTRA_SUBJECT, subject);
+                fallback.putExtra(Intent.EXTRA_TEXT, report);
+                try {
+                    startActivity(Intent.createChooser(fallback, getString(R.string.diag_email)));
+                } catch (ActivityNotFoundException ignored) {
+                    Toast.makeText(this, R.string.email_unavailable, Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+        LinearLayout.LayoutParams emailP = new LinearLayout.LayoutParams(-2, -2);
+        emailP.setMarginStart(Ui.dp(this, 8));
+        footer.addView(emailBtn, emailP);
+
+        android.app.Dialog dialog = new android.app.Dialog(this) {
+            @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+                if (event != null && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                        && event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) {
+                    recordProbe.accept("KeyEvent code=" + event.getKeyCode()
+                            + " (" + android.view.KeyEvent.keyCodeToString(event.getKeyCode()) + ")");
+                }
+                return super.dispatchKeyEvent(event);
+            }
+
+            @Override public boolean dispatchGenericMotionEvent(android.view.MotionEvent ev) {
+                if (ev != null && PenInput.isButtonPress(ev)) {
+                    recordProbe.accept("MotionEvent STYLUS_BUTTON btn=" + ev.getActionButton());
+                }
+                return super.dispatchGenericMotionEvent(ev);
+            }
+        };
+
+        TextView closeBtn = Ui.action(this, getString(R.string.close), false, dialog::dismiss);
+        LinearLayout.LayoutParams closeP = new LinearLayout.LayoutParams(-2, -2);
+        closeP.setMarginStart(Ui.dp(this, 8));
+        footer.addView(closeBtn, closeP);
+        panel.addView(footer, footP);
+
+        // Register a live probe receiver WITHOUT INJECT_EVENTS permission filter to detect any stylus broadcast
+        android.content.BroadcastReceiver probeReceiver = new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context ctx, Intent intent) {
+                if (intent == null) return;
+                recordProbe.accept("Broadcast " + intent.getAction());
+            }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter();
+        filter.addAction("com.huawei.stylus.action.BUTTON_DOUBLE_PRESSED");
+        filter.addAction("com.huawei.stylus.action.BUTTON_PRESSED");
+        filter.addAction("com.huawei.stylus.action.DOUBLE_TAP");
+        filter.addAction("huawei.intent.action.STYLUS_DOUBLE_CLICK");
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(probeReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(probeReceiver, filter);
+        }
+
+        dialog.setOnDismissListener(d -> {
+            try { unregisterReceiver(probeReceiver); } catch (IllegalArgumentException ignored) { }
+        });
+        dialog.setContentView(panel);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            int sh = getResources().getDisplayMetrics().heightPixels;
+            dialog.getWindow().setLayout(
+                    Math.min(Ui.dp(this, 560), sw - Ui.dp(this, 32)),
+                    Math.min(Ui.dp(this, 620), sh * 4 / 5));
+        }
+        dialog.show();
     }
 
     private LinearLayout contactCard() {

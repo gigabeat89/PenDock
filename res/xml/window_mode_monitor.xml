@@ -1,4 +1,5 @@
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityFlags="flagRetrieveInteractiveWindows"
     android:description="@string/window_mode_description"
+    android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true" />

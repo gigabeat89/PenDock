@@ -88,6 +88,7 @@
     <string name="dock_running">Running</string>
     <string name="dock_stopped">Stopped</string>
     <string name="pen_near_only">Open the ring only near the screen</string>
+    <string name="hmos_space_ring">Open ring with Alt + Space</string>
     <string name="theme">Theme</string>
     <string name="pen_input_hint">Touch and touchpad input supported</string>
     <string name="excluded_count">%1$d apps</string>
@@ -264,4 +265,13 @@
     <string name="update_open_github">View on GitHub</string>
     <string name="update_check_failed">Couldn\'t check for updates. Check your internet connection and try again.</string>
     <string name="browser_unavailable">No browser app is available to open this link.</string>
+    <string name="diag_title">Diagnostics &amp; Debug Log</string>
+    <string name="diag_detail">Test M-Pencil double-tap and export device diagnostics (no screen content or personal data included) to help troubleshoot issues.</string>
+    <string name="diag_open">Open diagnostics</string>
+    <string name="diag_probe_waiting">Double-tap your M-Pencil side now to test signal detection…</string>
+    <string name="diag_probe_detected">Signal detected: %1$s</string>
+    <string name="diag_copy">Copy</string>
+    <string name="diag_share">Share</string>
+    <string name="diag_email">Email developer</string>
+    <string name="diag_copied">Diagnostics log copied</string>
 </resources>

@@ -23,8 +23,17 @@ final class Appearance {
         return preferences(context).getString(THEME, LIGHT);
     }
 
+    static String languagePref(Context context) {
+        String value = preferences(context).getString(LANGUAGE, SYSTEM);
+        if ("th".equals(value) || "en".equals(value)) return value;
+        return SYSTEM;
+    }
+
     static String language(Context context) {
-        return preferences(context).getString(LANGUAGE, "en");
+        String pref = languagePref(context);
+        if ("th".equals(pref) || "en".equals(pref)) return pref;
+        Locale sys = android.content.res.Resources.getSystem().getConfiguration().getLocales().get(0);
+        return sys != null && "th".equalsIgnoreCase(sys.getLanguage()) ? "th" : "en";
     }
 
     static Context localize(Context context) {

@@ -129,8 +129,12 @@ public class DockService extends Service {
     private final BroadcastReceiver stylus = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (!DOUBLE_TAP.equals(intent.getAction()) || !running) return;
-            if (getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
-            android.util.Log.d("PenDock", "Huawei stylus double tap");
+            if (getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+                DiagLog.log("Stylus", "DOUBLE_TAP ignored (keyguard locked)");
+                return;
+            }
+            DiagLog.log("Stylus", "DOUBLE_TAP received (menu=" + (menu != null)
+                    + ", translate=" + (translateOverlay != null) + ")");
             if (circleSelection != null) cancelCircleSearch();
             else if (translateOverlay != null && translateOverlay.isDoubleTapLocked()) {
                 translateOverlay.togglePauseFromDoubleTap();
@@ -142,6 +146,24 @@ public class DockService extends Service {
             else showMenu(true);
         }
     };
+
+    private void handleKeyboardRingTrigger() {
+        if (!running || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
+        if (circleSelection != null) cancelCircleSearch();
+        else if (translateOverlay != null && translateOverlay.isDoubleTapLocked()) {
+            translateOverlay.togglePauseFromDoubleTap();
+        } else if (translateOverlay != null && !translateOverlay.isPaused()) {
+            translateOverlay.pauseIfActive();
+        } else if (splitPicker != null || splitTransitioning) {
+            return;
+        } else if (laserOverlay != null) {
+            cancelLaserOverlay();
+        } else if (menu != null) {
+            menu.dismiss();
+        } else {
+            showMenu(false);
+        }
+    }
 
     private final BroadcastReceiver screenChange = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -170,15 +192,18 @@ public class DockService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (!Settings.canDrawOverlays(this)) {
+            DiagLog.log("Service", "onStartCommand stopped: missing overlay permission");
             stopSelf();
             return START_NOT_STICKY;
         }
         if (intent == null && !isEnabled(this)) {
+            DiagLog.log("Service", "onStartCommand stopped: disabled");
             stopSelf();
             return START_NOT_STICKY;
         }
         if (intent != null) setEnabled(this, true);
         if (!running) {
+            DiagLog.log("Service", "DockService starting (API " + Build.VERSION.SDK_INT + ")");
             startForeground(1, Ui.notification(this, "dock", "PenDock",
                     Appearance.text(this, R.string.menu_tip)).build());
             manager = getSystemService(WindowManager.class);
@@ -213,6 +238,7 @@ public class DockService extends Service {
             listening = true;
             WindowModeMonitor.setFloatingPingListener((windowId, packageName, bounds) ->
                     main.post(() -> showFloatingPulse(windowId, packageName, bounds, false)));
+            WindowModeMonitor.setKeyTriggerListener(() -> main.post(this::handleKeyboardRingTrigger));
         }
         return START_STICKY;
     }
@@ -273,9 +299,11 @@ public class DockService extends Service {
         String foreground = focused != null && focused.activity != null
                 ? focused.activity.getPackageName() : null;
         if (useHover && exclusions.contains(foreground)) {
-            android.util.Log.d("PenDock", "Skipped pen menu for an excluded app");
+            DiagLog.log("Menu", "Skipped menu: excluded app (" + foreground + ")");
             return;
         }
+        DiagLog.log("Menu", "showMenu(useHover=" + useHover + ", fg=" + foreground
+                + ", blurDp=" + RingConfig.ringBlurDp(this) + ")");
         int request = ++menuRequest;
         int blurDp = RingConfig.ringBlurDp(this);
         if (blurDp > 0 && Build.VERSION.SDK_INT >= 31
@@ -347,6 +375,8 @@ public class DockService extends Service {
         try {
             manager.addView(opened, params);
             menu = opened;
+            DiagLog.log("Menu", "RadialMenu attached (nativeBlur=" + nativeBlur
+                    + ", blurFrame=" + (blurFrame != null) + ")");
             background.execute(() -> {
                 String battery = penBattery();
                 main.post(() -> {
@@ -356,11 +386,12 @@ public class DockService extends Service {
             // Settings can accept an overlay window but suppress its surface and focus.
             main.postDelayed(() -> {
                 if (menu == opened && !opened.hasWindowFocus()) {
-                    android.util.Log.d("PenDock", "Removed menu without window focus");
+                    DiagLog.log("Menu", "Removed menu: no window focus after 350ms");
                     detach();
                 }
             }, 350);
         } catch (WindowManager.BadTokenException | SecurityException unavailable) {
+            DiagLog.log("Menu", "addView failed: " + unavailable.getClass().getSimpleName());
             if (blurFrame != null && !blurFrame.isRecycled()) blurFrame.recycle();
             stopSelf();
         }
@@ -2343,6 +2374,7 @@ public class DockService extends Service {
 
     @Override public void onDestroy() {
         WindowModeMonitor.setFloatingPingListener(null);
+        WindowModeMonitor.setKeyTriggerListener(null);
         if (listening) {
             unregisterReceiver(stylus);
             unregisterReceiver(screenChange);
