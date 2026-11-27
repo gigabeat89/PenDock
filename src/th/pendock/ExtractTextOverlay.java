@@ -187,40 +187,58 @@ final class ExtractTextOverlay extends FrameLayout {
                 Math.min(screenshot.getWidth(), Math.round(box.right * sx)),
                 Math.min(screenshot.getHeight(), Math.round(box.bottom * sy)));
         if (region.width() < 12 || region.height() < 12) return;
+        if (closed || worker.isShutdown()) return;
+
+        // Crop on UI thread so DockService recycling `screenshot` on close can never race with worker OCR.
+        final Bitmap crop;
+        try {
+            crop = Bitmap.createBitmap(screenshot, region.left, region.top, region.width(), region.height());
+        } catch (RuntimeException oom) {
+            android.util.Log.e("PenDock", "Extract text crop failed", oom);
+            showResult(getContext().getString(R.string.translate_no_text), false);
+            return;
+        }
+        final Rect cropRect = new Rect(0, 0, crop.getWidth(), crop.getHeight());
 
         cancelTask();
         int gen = ++generation;
         showResult(getContext().getString(R.string.translate_scanning), false);
         OcrModelManager.Pack pack = activePack;
-        activeTask = worker.submit(() -> {
-            try {
-                List<ScreenOcrEngine.TextLine> lines =
-                        ScreenOcrEngine.recognizeRegion(getContext(), pack, screenshot, region);
-                List<ScreenOcrEngine.TextBlock> blocks = ScreenOcrEngine.groupIntoBlocks(lines);
-                StringBuilder sb = new StringBuilder();
-                for (ScreenOcrEngine.TextBlock b : blocks) {
-                    String t = b.text == null ? "" : b.text.trim();
-                    if (t.isEmpty()) continue;
-                    if (sb.length() > 0) sb.append("\n\n");
-                    sb.append(t);
-                }
-                String out = sb.toString();
-                main.post(() -> {
-                    if (closed || gen != generation) return;
-                    if (out.isEmpty()) {
-                        showResult(getContext().getString(R.string.translate_no_text), false);
-                    } else {
-                        showResult(out, true);
+        try {
+            activeTask = worker.submit(() -> {
+                try {
+                    List<ScreenOcrEngine.TextLine> lines =
+                            ScreenOcrEngine.recognizeRegion(getContext(), pack, crop, cropRect);
+                    List<ScreenOcrEngine.TextBlock> blocks = ScreenOcrEngine.groupIntoBlocks(lines);
+                    StringBuilder sb = new StringBuilder();
+                    for (ScreenOcrEngine.TextBlock b : blocks) {
+                        String t = b.text == null ? "" : b.text.trim();
+                        if (t.isEmpty()) continue;
+                        if (sb.length() > 0) sb.append("\n\n");
+                        sb.append(t);
                     }
-                });
-            } catch (Throwable err) {
-                android.util.Log.e("PenDock", "Extract text OCR failed", err);
-                main.post(() -> {
-                    if (closed || gen != generation) return;
-                    showResult(getContext().getString(R.string.translate_no_text), false);
-                });
-            }
-        });
+                    String out = sb.toString();
+                    main.post(() -> {
+                        if (closed || gen != generation) return;
+                        if (out.isEmpty()) {
+                            showResult(getContext().getString(R.string.translate_no_text), false);
+                        } else {
+                            showResult(out, true);
+                        }
+                    });
+                } catch (Throwable err) {
+                    android.util.Log.e("PenDock", "Extract text OCR failed", err);
+                    main.post(() -> {
+                        if (closed || gen != generation) return;
+                        showResult(getContext().getString(R.string.translate_no_text), false);
+                    });
+                } finally {
+                    if (!crop.isRecycled()) crop.recycle();
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            if (!crop.isRecycled()) crop.recycle();
+        }
     }
 
     private void showResult(String text, boolean hasContent) {
@@ -232,8 +250,8 @@ final class ExtractTextOverlay extends FrameLayout {
         shareBtn.setVisibility(hasContent ? VISIBLE : GONE);
         resultScroll.scrollTo(0, 0);
 
-        int w = getWidth();
-        int h = getHeight();
+        int w = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
+        int h = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
         int cardW = Math.min(dp(460), Math.max(dp(260), w - dp(32)));
         int maxScrollH = Math.max(dp(120), Math.round(h * 0.42f));
         resultText.measure(
@@ -263,8 +281,10 @@ final class ExtractTextOverlay extends FrameLayout {
         if (toCopy.isEmpty()) return;
         ClipboardManager cm = getContext().getSystemService(ClipboardManager.class);
         if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("PenDock Text", toCopy));
-            Toast.makeText(getContext(), R.string.extract_copied, Toast.LENGTH_SHORT).show();
+            try {
+                cm.setPrimaryClip(ClipData.newPlainText("PenDock Text", toCopy));
+                Toast.makeText(getContext(), R.string.extract_copied, Toast.LENGTH_SHORT).show();
+            } catch (RuntimeException ignored) { }
         }
         if (partial) {
             resultText.clearSelection();
@@ -300,6 +320,7 @@ final class ExtractTextOverlay extends FrameLayout {
         if (closed) return;
         closed = true;
         cancelTask();
+        main.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         if (onClose != null) onClose.run();
     }
@@ -307,6 +328,7 @@ final class ExtractTextOverlay extends FrameLayout {
     @Override protected void onDetachedFromWindow() {
         closed = true;
         cancelTask();
+        main.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         super.onDetachedFromWindow();
     }

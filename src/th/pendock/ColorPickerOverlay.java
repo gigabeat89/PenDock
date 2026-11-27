@@ -90,6 +90,7 @@ final class ColorPickerOverlay extends FrameLayout {
     private int currentColor = 0xff2863da;
     private boolean hasSample;
     private boolean paused;
+    private boolean destroyed;
     private boolean historyExpanded;
     private boolean edgeTucked;
     private boolean edgeOnRight;
@@ -371,13 +372,17 @@ final class ColorPickerOverlay extends FrameLayout {
     }
 
     void destroy() {
+        destroyed = true;
         copiedPopup.removeCallbacks(hideCopiedPopup);
+        copiedPopup.animate().cancel();
+        toolbarContainer.animate().cancel();
         Bitmap old = screenshot;
         screenshot = null;
         if (old != null && !old.isRecycled()) old.recycle();
     }
 
     private void togglePause() {
+        if (destroyed) return;
         if (!paused) {
             paused = true;
             hasSample = false;
@@ -553,18 +558,22 @@ final class ColorPickerOverlay extends FrameLayout {
     }
 
     private void copyColor(int color, String text, boolean recordNew) {
+        if (destroyed) return;
         int opaque = color | 0xff000000;
         applyHudColor(opaque);
         ClipboardManager cm = getContext().getSystemService(ClipboardManager.class);
         if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("PenDock Color", text));
-            toolbarContainer.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+            try {
+                cm.setPrimaryClip(ClipData.newPlainText("PenDock Color", text));
+                toolbarContainer.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+            } catch (RuntimeException ignored) { }
         }
         if (recordNew) recordHistory(opaque);
         showCopiedPopup(opaque, text);
     }
 
     private void showCopiedPopup(int color, String copiedValue) {
+        if (destroyed) return;
         copiedPopup.removeCallbacks(hideCopiedPopup);
         copiedPopup.animate().cancel();
         int toolbarBottom = barY + Math.max(dp(56), toolbarContainer.getHeight());
@@ -653,6 +662,7 @@ final class ColorPickerOverlay extends FrameLayout {
     }
 
     private void togglePin(int color) {
+        if (destroyed) return;
         int opaque = color | 0xff000000;
         // Record old Y positions of dropdown rows for smooth FLIP reorder animation
         Map<Integer, Integer> oldTops = new HashMap<>();
@@ -744,7 +754,7 @@ final class ColorPickerOverlay extends FrameLayout {
         final boolean[] cancelled = {false};
         final PathInterpolator smoothEase = new PathInterpolator(0.22f, 1f, 0.36f, 1f);
         final Runnable triggerPin = () -> {
-            if (fired[0] || cancelled[0]) return;
+            if (destroyed || fired[0] || cancelled[0]) return;
             fired[0] = true;
             row.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
             row.animate().cancel();

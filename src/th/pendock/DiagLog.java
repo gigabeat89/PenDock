@@ -18,15 +18,18 @@ import java.util.Locale;
 final class DiagLog {
     private static final int MAX_ENTRIES = 120;
     private static final ArrayDeque<String> BUFFER = new ArrayDeque<>(MAX_ENTRIES);
+    private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
 
     private DiagLog() { }
 
     static synchronized void log(String tag, String message) {
-        String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
-        String line = time + " [" + tag + "] " + message;
+        String safeMsg = message == null ? "" : message.replace('\n', ' ').replace('\r', ' ');
+        if (safeMsg.length() > 240) safeMsg = safeMsg.substring(0, 240) + "…";
+        String time = TIME_FMT.format(new Date());
+        String line = time + " [" + tag + "] " + safeMsg;
         if (BUFFER.size() >= MAX_ENTRIES) BUFFER.removeFirst();
         BUFFER.addLast(line);
-        android.util.Log.d("PenDock", "[" + tag + "] " + message);
+        android.util.Log.d("PenDock", "[" + tag + "] " + safeMsg);
     }
 
     static String buildReport(Context context, List<String> liveProbeEvents) {

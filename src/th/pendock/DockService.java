@@ -120,6 +120,13 @@ public class DockService extends Service {
     private int menuRequest;
     private boolean splitTransitioning;
     private final ExecutorService background = Executors.newSingleThreadExecutor();
+
+    private void runBackground(Runnable task) {
+        if (background.isShutdown()) return;
+        try {
+            background.execute(task);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) { }
+    }
     private Shortcuts shortcuts;
     private ExcludedApps exclusions;
     private List<Shortcuts.Entry> entries;
@@ -408,7 +415,7 @@ public class DockService extends Service {
             menu = opened;
             DiagLog.log("Menu", "RadialMenu attached (nativeBlur=" + nativeBlur
                     + ", blurFrame=" + (blurFrame != null) + ")");
-            background.execute(() -> {
+            runBackground(() -> {
                 String battery = penBattery();
                 main.post(() -> {
                     if (menu == opened) opened.setBattery(battery);
@@ -446,6 +453,7 @@ public class DockService extends Service {
 
     private void startCircleSearch() {
         detach();
+        pausePersistentStages();
         if (Build.VERSION.SDK_INT < 30) {
             Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
             return;
@@ -470,6 +478,7 @@ public class DockService extends Service {
 
     private void startPinToScreen() {
         detach();
+        pausePersistentStages();
         if (Build.VERSION.SDK_INT < 30) {
             Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
             return;
@@ -536,7 +545,7 @@ public class DockService extends Service {
     }
 
     private void dispatchCropAction(CircleSelection.Action action, Bitmap crop) {
-        background.execute(() -> {
+        runBackground(() -> {
             try {
                 Uri uri = CircleFiles.save(this, crop);
                 main.post(() -> {
@@ -664,7 +673,7 @@ public class DockService extends Service {
     }
 
     private void saveCircleToGallery(Bitmap crop) {
-        background.execute(() -> {
+        runBackground(() -> {
             Uri uri = null;
             boolean complete = false;
             try {
@@ -705,12 +714,20 @@ public class DockService extends Service {
         CircleSelection removed = circleSelection;
         circleSelection = null;
         removeOverlay(removed);
-        circleFrame.recycle();
-        circleFrame = null;
+        if (circleFrame != null) {
+            if (!circleFrame.isRecycled()) circleFrame.recycle();
+            circleFrame = null;
+        }
+    }
+
+    private void pausePersistentStages() {
+        if (colorPickerOverlay != null && !colorPickerOverlay.isPaused()) colorPickerOverlay.pauseIfActive();
+        if (translateOverlay != null && !translateOverlay.isPaused()) translateOverlay.pauseIfActive();
     }
 
     private void startExtractText() {
         detach();
+        pausePersistentStages();
         if (Build.VERSION.SDK_INT < 30) {
             Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
             return;
@@ -723,7 +740,9 @@ public class DockService extends Service {
             Toast.makeText(this, Appearance.text(this, R.string.extract_need_ocr_pack), Toast.LENGTH_LONG).show();
             Intent settings = new Intent(this, SettingsActivity.class);
             settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(settings);
+            try {
+                startActivity(settings);
+            } catch (ActivityNotFoundException | SecurityException ignored) { }
             return;
         }
         cancelExtractTextOverlay();
@@ -789,6 +808,7 @@ public class DockService extends Service {
 
     private void startColorPicker() {
         detach();
+        pausePersistentStages();
         if (Build.VERSION.SDK_INT < 30) {
             Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
             return;
@@ -994,6 +1014,7 @@ public class DockService extends Service {
 
     private void startTranslate() {
         detach();
+        pausePersistentStages();
         if (Build.VERSION.SDK_INT < 30) {
             Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
             return;
