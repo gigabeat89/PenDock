@@ -251,6 +251,15 @@
     <string name="pin_opacity">Toggle opacity</string>
     <string name="pin_resize">Resize pinned image</string>
     <string name="pin_hint_long_press">Pinned — long-press for Save, Copy, or Share</string>
+    <string name="extract_tool">Extract text</string>
+    <string name="extract_prompt">Drag a box to extract text</string>
+    <string name="extract_need_ocr_pack">Download an OCR language pack in Settings or Translate first.</string>
+    <string name="extract_copy_selected">Copy selected</string>
+    <string name="extract_copied">Copied text</string>
+    <string name="color_picker_tool">Color picker</string>
+    <string name="color_picker_hint">Hover or drag to sample · tap to copy</string>
+    <string name="color_copied">Copied %1$s</string>
+    <string name="color_picker_history">History</string>
     <string name="circle_copied">Copied image to clipboard.</string>
     <string name="circle_copy_failed">Couldn\'t copy the image.</string>
     <string name="circle_share_title">Share selected area</string>

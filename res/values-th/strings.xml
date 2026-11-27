@@ -259,6 +259,15 @@
     <string name="pin_opacity">ปรับความโปร่งใส</string>
     <string name="pin_resize">ปรับขนาดภาพปักหมุด</string>
     <string name="pin_hint_long_press">ปักหมุดแล้ว — กดค้างที่ภาพเพื่อ Save, Copy หรือ Share</string>
+    <string name="extract_tool">ดึงข้อความ</string>
+    <string name="extract_prompt">ลากกรอบครอบข้อความที่ต้องการดึง</string>
+    <string name="extract_need_ocr_pack">กรุณาดาวน์โหลดชุดภาษา OCR ในตั้งค่าหรือแปลภาษาก่อน</string>
+    <string name="extract_copy_selected">คัดลอกที่เลือก</string>
+    <string name="extract_copied">คัดลอกข้อความแล้ว</string>
+    <string name="color_picker_tool">ดูดสี</string>
+    <string name="color_picker_hint">จ่อปากกาหรือลากเพื่อดูดสี · แตะเพื่อคัดลอก</string>
+    <string name="color_copied">คัดลอกสี %1$s แล้ว</string>
+    <string name="color_picker_history">ประวัติสี</string>
     <string name="circle_copied">คัดลอกรูปภาพลงคลิปบอร์ดแล้ว</string>
     <string name="circle_copy_failed">คัดลอกรูปภาพไม่สำเร็จ</string>
     <string name="circle_share_title">แชร์ส่วนที่วง</string>

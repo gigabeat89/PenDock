@@ -135,18 +135,25 @@ public class WindowModeMonitor extends AccessibilityService {
         final FocusedApp focused;
         final Map<String, FloatingWindow> floating;
         final Set<String> visible;
+        final String topPackage;
 
-        Snapshot(FocusedApp focused, Map<String, FloatingWindow> floating, Set<String> visible) {
+        Snapshot(FocusedApp focused, Map<String, FloatingWindow> floating, Set<String> visible, String topPackage) {
             this.focused = focused;
             this.floating = floating;
             this.visible = visible;
+            this.topPackage = topPackage;
+        }
+
+        String foregroundPackage() {
+            if (focused != null && focused.packageName != null) return focused.packageName;
+            return topPackage;
         }
     }
 
     /** Reads focused app, floating windows, and visible packages in a single getWindows() IPC pass. */
     static Snapshot snapshot() {
         if (connected == null || !connected.tracking) {
-            return new Snapshot(null, new HashMap<>(), new HashSet<>());
+            return new Snapshot(null, new HashMap<>(), new HashSet<>(), null);
         }
         return connected.readSnapshot();
     }
@@ -155,13 +162,17 @@ public class WindowModeMonitor extends AccessibilityService {
         FocusedApp focused = null;
         Map<String, FloatingWindow> floating = new HashMap<>();
         Set<String> visible = new HashSet<>();
+        String topPackage = null;
         List<AccessibilityWindowInfo> windows = getWindows();
         try {
             Rect display = usableDisplay();
             for (AccessibilityWindowInfo window : windows) {
                 if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 String pkg = windowPackageName(window);
-                if (pkg != null && !isHomePackage(pkg)) visible.add(pkg);
+                if (pkg != null) {
+                    if (topPackage == null) topPackage = pkg;
+                    if (!isHomePackage(pkg)) visible.add(pkg);
+                }
 
                 Rect bounds = new Rect();
                 window.getBoundsInScreen(bounds);
@@ -180,10 +191,10 @@ public class WindowModeMonitor extends AccessibilityService {
                     boolean split = !windowed && (spansWidth != spansHeight)
                             && isDockedSplit(bounds, display, spansWidth);
                     App app = activities.get(window.getId());
-                    focused = new FocusedApp(app, windowed, split, bounds);
+                    focused = new FocusedApp(app, pkg, windowed, split, bounds);
                 }
             }
-            return new Snapshot(focused, floating, visible);
+            return new Snapshot(focused, floating, visible, topPackage);
         } finally {
             for (AccessibilityWindowInfo window : windows) window.recycle();
         }
@@ -490,13 +501,19 @@ public class WindowModeMonitor extends AccessibilityService {
 
     static final class FocusedApp {
         final ComponentName activity;
+        final String packageName;
         final Intent floatingIntent;
         final boolean alreadyWindowed;
         final boolean alreadySplit;
         final Rect bounds;
 
         FocusedApp(App app, boolean windowed, boolean split, Rect bounds) {
+            this(app, null, windowed, split, bounds);
+        }
+
+        FocusedApp(App app, String fallbackPackage, boolean windowed, boolean split, Rect bounds) {
             activity = app == null ? null : app.activity;
+            packageName = activity != null ? activity.getPackageName() : fallbackPackage;
             floatingIntent = app == null || app.floatingIntent == null ? null : new Intent(app.floatingIntent);
             alreadyWindowed = windowed;
             alreadySplit = split;

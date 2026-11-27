@@ -83,24 +83,27 @@ final class RadialMenu extends FrameLayout {
 
     RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
             Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode,
-            Runnable translateScreen, Runnable pinScreen, Runnable close,
+            Runnable translateScreen, Runnable pinScreen, Runnable extractText, Runnable colorPicker,
+            Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             Bitmap blurFrame) {
         this(context, fallbackX, fallbackY, useHover, lock, capture, circleSearch, laserMode,
-                translateScreen, pinScreen, close, entries, launch, battery, floatActive, alreadyWindowed,
-                splitActive, alreadySplit, blurFrame, false);
+                translateScreen, pinScreen, extractText, colorPicker, close, entries, launch, battery,
+                floatActive, alreadyWindowed, splitActive, alreadySplit, blurFrame, false);
     }
 
     static RadialMenu preview(Context context, List<Shortcuts.Entry> entries) {
         Runnable sample = () -> { };
-        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample, sample, sample,
+        return new RadialMenu(context, 0, 0, false, sample, sample, sample, sample, sample, sample,
+                sample, sample, sample,
                 entries, app -> { }, "—", sample, false, sample, false, null, true);
     }
 
     private RadialMenu(Context context, float fallbackX, float fallbackY, boolean useHover,
             Runnable lock, Runnable capture, Runnable circleSearch, Runnable laserMode,
-            Runnable translateScreen, Runnable pinScreen, Runnable close,
+            Runnable translateScreen, Runnable pinScreen, Runnable extractText, Runnable colorPicker,
+            Runnable close,
             List<Shortcuts.Entry> entries, Consumer<Shortcuts.Entry> launch, String battery,
             Runnable floatActive, boolean alreadyWindowed, Runnable splitActive, boolean alreadySplit,
             Bitmap blurFrame, boolean preview) {
@@ -208,6 +211,8 @@ final class RadialMenu extends FrameLayout {
                     case LASER_POINTER: action = laserMode; break;
                     case TRANSLATE: action = translateScreen; break;
                     case PIN_SCREEN: action = pinScreen; break;
+                    case EXTRACT_TEXT: action = extractText; break;
+                    case COLOR_PICKER: action = colorPicker; break;
                 }
             }
             addButton(index, entry.icon, label, action);

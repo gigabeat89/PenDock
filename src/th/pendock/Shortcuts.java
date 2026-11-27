@@ -35,7 +35,9 @@ final class Shortcuts {
         SPLIT_SCREEN("tool:split_screen", R.string.split_screen, R.drawable.ic_split),
         LASER_POINTER("tool:laser_pointer", R.string.laser_tool, R.drawable.ic_laser),
         TRANSLATE("tool:translate", R.string.translate_tool, R.drawable.ic_translate),
-        PIN_SCREEN("tool:pin_screen", R.string.pin_tool, R.drawable.ic_pin);
+        PIN_SCREEN("tool:pin_screen", R.string.pin_tool, R.drawable.ic_pin),
+        EXTRACT_TEXT("tool:extract_text", R.string.extract_tool, R.drawable.ic_extract_text),
+        COLOR_PICKER("tool:color_picker", R.string.color_picker_tool, R.drawable.ic_eyedropper);
 
         final String id;
         final int label;

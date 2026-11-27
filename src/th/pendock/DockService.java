@@ -105,6 +105,16 @@ public class DockService extends Service {
     private int pulseRequest;
     private Bitmap circleFrame;
     private int circleRequest;
+    private ExtractTextOverlay extractOverlay;
+    private Bitmap extractFrame;
+    private int extractRequest;
+    private ColorPickerOverlay colorPickerOverlay;
+    private WindowManager.LayoutParams colorPickerParams;
+    private View colorPickerToolbarView;
+    private WindowManager.LayoutParams colorPickerToolbarParams;
+    private View colorPickerPopupView;
+    private WindowManager.LayoutParams colorPickerPopupParams;
+    private int colorPickerRequest;
     private int translateRequest;
     private int splitRequest;
     private int menuRequest;
@@ -136,6 +146,10 @@ public class DockService extends Service {
             DiagLog.log("Stylus", "DOUBLE_TAP received (menu=" + (menu != null)
                     + ", translate=" + (translateOverlay != null) + ")");
             if (circleSelection != null) cancelCircleSearch();
+            else if (extractOverlay != null) cancelExtractTextOverlay();
+            else if (colorPickerOverlay != null && !colorPickerOverlay.isPaused()) {
+                colorPickerOverlay.pauseIfActive();
+            }
             else if (translateOverlay != null && translateOverlay.isDoubleTapLocked()) {
                 translateOverlay.togglePauseFromDoubleTap();
             }
@@ -150,6 +164,10 @@ public class DockService extends Service {
     private void handleKeyboardRingTrigger() {
         if (!running || getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
         if (circleSelection != null) cancelCircleSearch();
+        else if (extractOverlay != null) cancelExtractTextOverlay();
+        else if (colorPickerOverlay != null && !colorPickerOverlay.isPaused()) {
+            colorPickerOverlay.pauseIfActive();
+        }
         else if (translateOverlay != null && translateOverlay.isDoubleTapLocked()) {
             translateOverlay.togglePauseFromDoubleTap();
         } else if (translateOverlay != null && !translateOverlay.isPaused()) {
@@ -168,6 +186,10 @@ public class DockService extends Service {
     private final BroadcastReceiver screenChange = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             cancelCircleSearch();
+            cancelExtractTextOverlay();
+            if (colorPickerOverlay != null && !colorPickerOverlay.isPaused()) {
+                colorPickerOverlay.pauseIfActive();
+            }
             // Keep TranslateOverlay alive across app switches / Home; pause it if screen turns off while active.
             if (translateOverlay != null && !translateOverlay.isPaused()) {
                 translateOverlay.pauseIfActive();
@@ -252,6 +274,11 @@ public class DockService extends Service {
             refreshShortcuts();
         }
         cancelCircleSearch();
+        cancelExtractTextOverlay();
+        if (colorPickerOverlay != null) {
+            if (!colorPickerOverlay.isPaused()) colorPickerOverlay.pauseIfActive();
+            colorPickerOverlay.onDisplayRotated();
+        }
         if (translateOverlay != null) {
             if (!translateOverlay.isPaused()) translateOverlay.pauseIfActive();
             translateOverlay.onDisplayRotated();
@@ -286,6 +313,8 @@ public class DockService extends Service {
 
     private void showMenu(boolean useHover) {
         if (menu != null || circleSelection != null
+                || extractOverlay != null
+                || (colorPickerOverlay != null && !colorPickerOverlay.isPaused())
                 || (translateOverlay != null && !translateOverlay.isPaused())
                 || splitPicker != null || laserOverlay != null) return;
         if (!Settings.canDrawOverlays(this)) {
@@ -296,8 +325,7 @@ public class DockService extends Service {
         WindowModeMonitor.FocusedApp focused = snap.focused;
         Map<String, WindowModeMonitor.FloatingWindow> openFloating = snap.floating;
         Set<String> visibleApps = snap.visible;
-        String foreground = focused != null && focused.activity != null
-                ? focused.activity.getPackageName() : null;
+        String foreground = snap.foregroundPackage();
         if (useHover && exclusions.contains(foreground)) {
             DiagLog.log("Menu", "Skipped menu: excluded app (" + foreground + ")");
             return;
@@ -318,6 +346,8 @@ public class DockService extends Service {
     private void attachMenu(int request, boolean useHover, WindowModeMonitor.FocusedApp focused,
             Map<String, WindowModeMonitor.FloatingWindow> openFloating, Set<String> visibleApps, Bitmap blurFrame) {
         if (request != menuRequest || !running || menu != null || circleSelection != null
+                || extractOverlay != null
+                || (colorPickerOverlay != null && !colorPickerOverlay.isPaused())
                 || (translateOverlay != null && !translateOverlay.isPaused())
                 || splitPicker != null || laserOverlay != null
                 || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
@@ -349,7 +379,8 @@ public class DockService extends Service {
         RadialMenu[] menuRef = new RadialMenu[1];
         RadialMenu opened = new RadialMenu(menuContext, bounds.exactCenterX(), bounds.exactCenterY(), useHover,
                 this::lockScreen, this::takeScreenshot, this::startCircleSearch, this::startLaserPointer,
-                this::startTranslate, this::startPinToScreen, () -> detach(menuRef[0]),
+                this::startTranslate, this::startPinToScreen, this::startExtractText, this::startColorPicker,
+                () -> detach(menuRef[0]),
                 entries, app -> openShortcut(app, focused, openFloating, visibleApps), "—",
                 activeTarget == null || alreadyWindowed ? null : () -> floatActive(activeTarget, focused),
                 alreadyWindowed,
@@ -676,6 +707,289 @@ public class DockService extends Service {
         removeOverlay(removed);
         circleFrame.recycle();
         circleFrame = null;
+    }
+
+    private void startExtractText() {
+        detach();
+        if (Build.VERSION.SDK_INT < 30) {
+            Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!CircleCaptureService.isReady()) {
+            openForPermission(MainActivity.PERM_CIRCLE, "extract");
+            return;
+        }
+        if (!OcrModelManager.anyPackReady(this)) {
+            Toast.makeText(this, Appearance.text(this, R.string.extract_need_ocr_pack), Toast.LENGTH_LONG).show();
+            Intent settings = new Intent(this, SettingsActivity.class);
+            settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(settings);
+            return;
+        }
+        cancelExtractTextOverlay();
+        int request = ++extractRequest;
+        main.postDelayed(() -> {
+            if (request != extractRequest || menu != null) return;
+            CircleCaptureService.capture(frame -> showExtractTextOverlay(request, frame));
+        }, 120);
+    }
+
+    private void showExtractTextOverlay(int request, Bitmap frame) {
+        if (request != extractRequest || menu != null
+                || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+            if (frame != null) frame.recycle();
+            return;
+        }
+        if (frame == null) {
+            Toast.makeText(this, Appearance.text(this, R.string.capture_failed), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            frame.recycle();
+            stopSelf();
+            return;
+        }
+        ExtractTextOverlay overlay = new ExtractTextOverlay(Appearance.localize(this), frame,
+                this::cancelExtractTextOverlay);
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_SECURE
+                        | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+                PixelFormat.OPAQUE);
+        params.setTitle("PenDock extract text");
+        params.gravity = Gravity.TOP | Gravity.LEFT;
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN;
+        params.setFitInsetsTypes(0);
+        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        try {
+            manager.addView(overlay, params);
+            extractOverlay = overlay;
+            extractFrame = frame;
+            overlay.requestFocus();
+            DiagLog.log("Extract", "ExtractTextOverlay attached (" + frame.getWidth() + "x" + frame.getHeight() + ")");
+        } catch (WindowManager.BadTokenException | SecurityException unavailable) {
+            DiagLog.log("Extract", "addView failed: " + unavailable.getClass().getSimpleName());
+            frame.recycle();
+            Toast.makeText(this, Appearance.text(this, R.string.circle_overlay_failed), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void cancelExtractTextOverlay() {
+        extractRequest++;
+        if (extractOverlay == null) return;
+        ExtractTextOverlay removed = extractOverlay;
+        extractOverlay = null;
+        removeOverlay(removed);
+        if (extractFrame != null) {
+            extractFrame.recycle();
+            extractFrame = null;
+        }
+    }
+
+    private void startColorPicker() {
+        detach();
+        if (Build.VERSION.SDK_INT < 30) {
+            Toast.makeText(this, Appearance.text(this, R.string.circle_android_version), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!CircleCaptureService.isReady()) {
+            openForPermission(MainActivity.PERM_CIRCLE, "color");
+            return;
+        }
+        cancelColorPickerOverlay();
+        int request = ++colorPickerRequest;
+        main.postDelayed(() -> {
+            if (request != colorPickerRequest || menu != null) return;
+            CircleCaptureService.capture(frame -> showColorPickerOverlay(request, frame));
+        }, 120);
+    }
+
+    private void showColorPickerOverlay(int request, Bitmap frame) {
+        if (request != colorPickerRequest || menu != null
+                || getSystemService(KeyguardManager.class).isKeyguardLocked()) {
+            if (frame != null) frame.recycle();
+            return;
+        }
+        if (frame == null) {
+            Toast.makeText(this, Appearance.text(this, R.string.capture_failed), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            frame.recycle();
+            stopSelf();
+            return;
+        }
+        ColorPickerOverlay[] ref = new ColorPickerOverlay[1];
+        ColorPickerOverlay overlay = new ColorPickerOverlay(Appearance.localize(this), frame,
+                new ColorPickerOverlay.Host() {
+                    @Override public void onPause() {
+                        if (colorPickerOverlay != ref[0] || colorPickerParams == null || manager == null) return;
+                        ref[0].setVisibility(View.GONE);
+                        colorPickerParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                                | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+                        try {
+                            manager.updateViewLayout(ref[0], colorPickerParams);
+                        } catch (IllegalArgumentException ignored) { }
+                    }
+
+                    @Override public void onMoveToolbar(int windowX, int windowY) {
+                        if (colorPickerOverlay != ref[0] || colorPickerToolbarView == null
+                                || colorPickerToolbarParams == null || manager == null) return;
+                        colorPickerToolbarParams.x = windowX;
+                        colorPickerToolbarParams.y = windowY;
+                        try {
+                            manager.updateViewLayout(colorPickerToolbarView, colorPickerToolbarParams);
+                        } catch (IllegalArgumentException ignored) { }
+                    }
+
+                    @Override public void onCopiedPopupPosition(boolean showAtTop) {
+                        if (colorPickerOverlay != ref[0] || colorPickerPopupView == null
+                                || colorPickerPopupParams == null || manager == null) return;
+                        int targetGravity = (showAtTop ? Gravity.TOP : Gravity.BOTTOM) | Gravity.CENTER_HORIZONTAL;
+                        if (colorPickerPopupParams.gravity != targetGravity) {
+                            colorPickerPopupParams.gravity = targetGravity;
+                            try {
+                                manager.updateViewLayout(colorPickerPopupView, colorPickerPopupParams);
+                            } catch (IllegalArgumentException ignored) { }
+                        }
+                    }
+
+                    @Override public void onRequestResume() {
+                        if (colorPickerOverlay != ref[0] || colorPickerParams == null || manager == null) return;
+                        int resumeReq = ++colorPickerRequest;
+                        View bar = colorPickerToolbarView;
+                        Runnable doCapture = () -> {
+                            if (resumeReq != colorPickerRequest || colorPickerOverlay != ref[0] || menu != null) {
+                                if (bar != null) bar.animate().alpha(1f).setDuration(140).start();
+                                return;
+                            }
+                            CircleCaptureService.capture(fresh -> {
+                                if (bar != null && bar.isAttachedToWindow()) {
+                                    bar.animate().cancel();
+                                    bar.animate().alpha(1f).setDuration(150).start();
+                                }
+                                if (resumeReq != colorPickerRequest || colorPickerOverlay != ref[0] || menu != null) {
+                                    if (fresh != null) fresh.recycle();
+                                    return;
+                                }
+                                if (fresh == null) {
+                                    Toast.makeText(DockService.this,
+                                            Appearance.text(DockService.this, R.string.capture_failed),
+                                            Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                colorPickerParams.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                        | WindowManager.LayoutParams.FLAG_SECURE
+                                        | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+                                ref[0].setVisibility(View.VISIBLE);
+                                try {
+                                    manager.updateViewLayout(ref[0], colorPickerParams);
+                                } catch (IllegalArgumentException ignored) { }
+                                ref[0].resumeWithFrame(fresh);
+                                ref[0].requestFocus();
+                            });
+                        };
+                        if (bar != null && bar.isAttachedToWindow()) {
+                            bar.animate().cancel();
+                            bar.animate().alpha(0f).setDuration(85)
+                                    .withEndAction(() -> main.postDelayed(doCapture, 24))
+                                    .start();
+                        } else {
+                            doCapture.run();
+                        }
+                    }
+
+                    @Override public void onClose() {
+                        cancelColorPickerOverlay();
+                    }
+                });
+        ref[0] = overlay;
+        WindowManager.LayoutParams stageParams = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_SECURE
+                        | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+                PixelFormat.OPAQUE);
+        stageParams.setTitle("PenDock color picker stage");
+        stageParams.gravity = Gravity.TOP | Gravity.LEFT;
+        stageParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN;
+        stageParams.setFitInsetsTypes(0);
+        stageParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+
+        View toolbarView = overlay.toolbarView();
+        WindowManager.LayoutParams barParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        barParams.setTitle("PenDock color picker toolbar");
+        barParams.gravity = Gravity.TOP | Gravity.LEFT;
+        barParams.x = overlay.toolbarX();
+        barParams.y = overlay.toolbarY();
+        if (Build.VERSION.SDK_INT >= 30) {
+            barParams.setFitInsetsTypes(0);
+            barParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        View popupView = overlay.copiedPopupView();
+        WindowManager.LayoutParams popParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        popParams.setTitle("PenDock color copied");
+        popParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        popParams.y = Ui.dp(this, 42);
+        if (Build.VERSION.SDK_INT >= 30) {
+            popParams.setFitInsetsTypes(0);
+            popParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+        try {
+            manager.addView(overlay, stageParams);
+            manager.addView(toolbarView, barParams);
+            manager.addView(popupView, popParams);
+            colorPickerOverlay = overlay;
+            colorPickerParams = stageParams;
+            colorPickerToolbarView = toolbarView;
+            colorPickerToolbarParams = barParams;
+            colorPickerPopupView = popupView;
+            colorPickerPopupParams = popParams;
+            overlay.requestFocus();
+            DiagLog.log("ColorPicker", "ColorPickerOverlay attached (" + frame.getWidth() + "x" + frame.getHeight() + ")");
+        } catch (WindowManager.BadTokenException | SecurityException unavailable) {
+            DiagLog.log("ColorPicker", "addView failed: " + unavailable.getClass().getSimpleName());
+            removeOverlay(popupView);
+            removeOverlay(toolbarView);
+            removeOverlay(overlay);
+            overlay.destroy();
+            Toast.makeText(this, Appearance.text(this, R.string.circle_overlay_failed), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void cancelColorPickerOverlay() {
+        colorPickerRequest++;
+        View removedPopup = colorPickerPopupView;
+        colorPickerPopupView = null;
+        colorPickerPopupParams = null;
+        if (removedPopup != null) removeOverlay(removedPopup);
+        View removedBar = colorPickerToolbarView;
+        colorPickerToolbarView = null;
+        colorPickerToolbarParams = null;
+        if (removedBar != null) removeOverlay(removedBar);
+        ColorPickerOverlay removed = colorPickerOverlay;
+        colorPickerOverlay = null;
+        colorPickerParams = null;
+        if (removed == null) return;
+        removeOverlay(removed);
+        removed.destroy();
     }
 
     private void startTranslate() {
@@ -2384,6 +2698,8 @@ public class DockService extends Service {
         }
         main.removeCallbacksAndMessages(null);
         cancelCircleSearch();
+        cancelExtractTextOverlay();
+        cancelColorPickerOverlay();
         cancelTranslateOverlay();
         clearAllPinnedOverlays();
         cancelSplitPicker();
